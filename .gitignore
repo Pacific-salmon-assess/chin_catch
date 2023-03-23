@@ -1,0 +1,31 @@
+*.aux
+*.bbl
+*.blg
+*~*
+*.dvi
+*.log
+*.lot
+*.ps
+*.toc
+# *.txt
+*.out
+*.snm
+*.nav
+*.synctex.gz*
+knitr-cache
+.RData
+*.accdb
+*.laccdb
+*.mdb
+
+# History files
+.Rhistory
+.Rapp.history
+
+myNotes.*
+.Rproj.user/
+.Rproj.user
+*.html
+scripts/*cache*
+*.o
+*.so
