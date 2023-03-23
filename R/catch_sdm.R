@@ -15,20 +15,18 @@ library(sf)
 library(sdmTMBextra)
 
 # Import stage data and fitted model generated in gen_detection_histories.R
-stage_dat <- readRDS(here::here("data", "generated_data", 
-                                "agg_lifestage_df.RDS")) %>% 
+stage_dat <- readRDS(here::here("data", "agg_lifestage_df.RDS")) %>% 
   dplyr::select(vemco_code, stage)
 
 
-chin_raw <- readRDS(here::here("data", "tagging_data", 
-                               "cleanTagData_GSI.RDS")) %>%
+chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
   mutate(year_day = lubridate::yday(date)) %>% 
   rename(vemco_code = acoustic_year, agg = agg_name) %>% 
   left_join(., stage_dat, by = "vemco_code") 
 
 
 ## predict life stage based on fitted model 
-stage_mod <- readRDS(here::here("data", "model_outputs", "stage_fl_hierA.RDS"))
+stage_mod <- readRDS(here::here("data", "stage_fl_hierA.RDS"))
 # include RIs when stock ID is known
 pred_dat <- tidybayes::add_epred_draws(
   object = stage_mod,
@@ -62,8 +60,8 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
     month = lubridate::month(date),
     size_bin = case_when(
       fl < 65 ~ "small",
-      fl >= 65 & fl < 75 ~ "medium",
-      fl >= 75 ~ "large"
+      fl >= 65 & fl < 74 ~ "medium",
+      fl >= 74 ~ "large"
     )
   ) %>% 
   dplyr::select(fish, vemco_code, event, date, year, month, year_day,
@@ -72,6 +70,9 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
 chin %>% 
   group_by(size_bin) %>% 
   tally()
+catch_stock %>% 
+  group_by(agg) %>% 
+  tally()
     
 # calculate total catch across size bins
 catch_size <- chin %>% 
@@ -79,14 +80,17 @@ catch_size <- chin %>%
   summarize(catch = n(), .groups = "drop") %>% 
   ungroup()
 catch_stock <- chin %>%
-  filter(!is.na(agg)) %>% 
+  filter(!is.na(agg),
+         fl > 65,
+         # remove rare stocks
+         !agg %in% c("ECVI", "WCVI", "WA_OR", "Cali")) %>% 
   group_by(event, agg) %>% 
   summarize(catch = n(), .groups = "drop") %>% 
   ungroup()
 
 
 # clean and bind to set data
-set_dat <- readRDS(here::here("data", "tagging_data", "cleanSetData.RDS")) %>% 
+set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>% 
   mutate(
     week = lubridate::week(date_time_local)
   )
@@ -102,22 +106,50 @@ catch <- expand.grid(event = set_dat$event,
   left_join(., catch_size, by = c("event", "size_bin")) %>%
   replace_na(., replace = list(catch = 0)) %>% 
   left_join(., set_dat, by = "event") %>%
-  # left_join(., sst, by = c("month", "year")) %>% 
   mutate(
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
     offset = log(set_dist),
-    # sst_z = scale(sst)[ , 1],
+    depth_z = scale(mean_depth)[ , 1],
+    slack_z = scale(hours_from_slack)[ , 1],
+    week_z = scale(week)[ , 1]
+  ) %>% 
+  # remove sets not on a troller
+  filter(!grepl("rec", event))
+
+catch_stock <- expand.grid(
+  event = set_dat$event,
+  agg = unique(catch_stock$agg)
+) %>% 
+  arrange(event) %>% 
+  left_join(., catch_stock, by = c("event", "agg")) %>%
+  replace_na(., replace = list(catch = 0)) %>% 
+  left_join(., set_dat, by = "event") %>%
+  mutate(
+    year_f = as.factor(year),
+    yUTM_ds = yUTM / 1000,
+    xUTM_ds = xUTM / 1000,
+    offset = log(set_dist),
+    depth_z = scale(mean_depth)[ , 1],
+    slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1]
   ) %>% 
   # remove sets not on a troller
   filter(!grepl("rec", event))
 
 
-catch_tbl <- as_tibble(catch) %>% 
+catch_tbl_size <- as_tibble(catch) %>% 
   group_by(size_bin) %>% 
-  group_nest()
+  group_nest() %>% 
+  rename(group_var = size_bin) %>% 
+  mutate(grouping = "size")
+catch_tbl_stock <- as_tibble(catch_stock) %>% 
+  group_by(agg) %>% 
+  group_nest() %>%
+  rename(group_var = agg) %>% 
+  mutate(grouping = "stock")
+catch_tbl <- rbind(catch_tbl_size, catch_tbl_stock)
 
 
 # BUILD MESHES -----------------------------------------------------------------
@@ -137,13 +169,13 @@ sdm_mesh2 <- make_mesh(catch %>% filter(size_bin == "large"),
 ncores <- parallel::detectCores() 
 future::plan(future::multisession, workers = ncores - 3)
 
-catch_tbl$sp_fits <- furrr::future_map(
-  catch_tbl$data,
+sub_tbl <- catch_tbl %>% filter(grouping == "stock")
+
+sp_fits <- furrr::future_map(
+  sub_tbl$data,
   ~ sdmTMB(
-    catch ~ #0 + year_f 
-      (1 | year_f) +
+    catch ~ (1 | year_f) +
       mean_depth +
-      mean_slope +
       hours_from_slack
       , 
     offset = "offset",
@@ -160,12 +192,12 @@ catch_tbl$sp_fits <- furrr::future_map(
   )
 )
 
-purrr::map(catch_tbl$sp_fits, sanity)
+purrr::map(sp_fits, sanity)
 # converges well
 
 # residual plots
 purrr::map(
-  catch_tbl$sp_fits, 
+  sp_fits, 
   ~ {
    sims <- simulate(.x, nsim = 30)
    dharma_residuals(sims, .x)
@@ -192,14 +224,13 @@ sp_plots <- purrr::map2(
 
 ## TOTAL CATCH SPATIOTEMPORAL MODELS -------------------------------------------
 
-catch_tbl$st_fits <- furrr::future_map(
-  catch_tbl$data,
+catch_tbl$st_fits[4:6] <- furrr::future_map(
+  catch_tbl$data[4:6],
   ~ sdmTMB(
     catch ~ #0 + year_f 
-      (1 | year_f) +
-      mean_depth +
-      # mean_slope +
-      hours_from_slack
+      (1 | year_f)# +
+      # mean_depth #+
+      # hours_from_slack
     , 
     offset = "offset",
     data = .x,
@@ -208,7 +239,6 @@ catch_tbl$st_fits <- furrr::future_map(
     spatial = "on",
     spatiotemporal = "iid",
     anisotropy = FALSE,
-    share_range = TRUE,
     time = "month",
     control = sdmTMBcontrol(
       newton_loops = 1
@@ -218,9 +248,8 @@ catch_tbl$st_fits <- furrr::future_map(
   )
 )
 
-purrr::map(catch_tbl$st_fits, sanity)
+purrr::map(catch_tbl$st_fits[4:6], sanity)
 # converges well
-
 
 
 ## RESIDUAL CHECKS -------------------------------------------------------------
@@ -264,20 +293,12 @@ purrr::map(
 )
 
 
-# residuals look good 
-catch$resids <- residuals(st_month_ar1)
-ggplot(data = catch) +
-  geom_point(aes(x = xUTM, y = yUTM, colour = resids)) +
-  scale_color_gradient2() +
-  facet_wrap(~year) +
-  ggsidekick::theme_sleek()
-
 
 ## FIXED EFFECTS ---------------------------------------------------------------
 
 for (i in 1:nrow(catch_tbl)) {
   file_name <- paste(catch_tbl$size_bin[[i]], "st_fixed_effects.pdf", sep = "_")
-  pdf(here::here("figs", "sdm_catch", file_name))
+  pdf(here::here("figs", file_name))
   visreg::visreg(catch_tbl$st_fits[[i]], 
                  xvar = "hours_from_slack", scale = "response")
   visreg::visreg(catch_tbl$st_fits[[i]], 
@@ -288,13 +309,13 @@ for (i in 1:nrow(catch_tbl)) {
 
 # PREDICTION GRID --------------------------------------------------------------
 
-# import 1.8 X 1.8 km grid generated in prep_bathymetry.R
+# import 1.8 X 1.8 km grid generated in prep_bathymetry.R in chinTagging repo
 pred_bathy_grid <- readRDS(
-  here::here("data", "spatial_data", "pred_bathy_grid_utm.RDS"))
+  here::here("data", "pred_bathy_grid_utm.RDS"))
 
 # generate combinations for month/year
 month_year <- expand.grid(
-  month = c(6, 7, 8, 9),
+  month = c(5, 6, 7, 8, 9),
   year_day = c(166, 196, 227, 258),
   year = unique(catch$year)
 )
@@ -327,19 +348,19 @@ pred_grid <- pred_grid_list %>%
 
 ## SPATIAL PREDICTIONS ---------------------------------------------------------
 
-preds_year <- predict(st_year_ar1, newdata = pred_grid)
-preds_month <- predict(st_month_ar1, newdata = pred_grid)
+catch_tbl$sim_preds <- purrr::map(
+  catch_tbl$st_fits,
+  ~ predict(.x, newdata = pred_grid, nsim = 20, type = "response")
+)
+catch_tbl$preds <- purrr::map(
+  catch_tbl$st_fits,
+  ~ predict(.x, newdata = pred_grid)
+)
 
-preds_both <- rbind(
-  preds_year %>% 
-    mutate(
-      model = "year_st"
-    ),
-  preds_month %>% 
-    mutate(
-      model = "month_st"
-    )
-  )
+catch_preds <- catch_tbl %>% 
+  dplyr::select(size_bin, preds) %>% 
+  unnest(cols = c(preds))
+
 
 # helper function for simple predictive maps
 plot_map <- function(dat, column) {
@@ -349,136 +370,35 @@ plot_map <- function(dat, column) {
     ggsidekick::theme_sleek()
 }
 
+
 #Predictions incorporating all fixed and random effects
 # Generally the impacts of different meshes considered here were negligible
-plot_map(preds_both %>% filter(year == "2020"), exp(est)) +
+month_preds <- plot_map(catch_preds %>% filter(year == "2019"), exp(est)) +
   scale_fill_viridis_c(trans = "sqrt") +
   ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(model~month) 
-plot_map(preds_both %>% filter(month == "7"), exp(est)) +
+  facet_grid(size_bin~month) 
+year_preds <- plot_map(catch_preds %>% filter(month == "7"), exp(est)) +
   scale_fill_viridis_c(trans = "sqrt") +
   ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(model~year) #+
-
+  facet_grid(size_bin~year) #+
 
 
 # Spatial random effects (i.e. independent of time)
-plot_map(preds_both, omega_s) +
+omega <- plot_map(catch_preds, omega_s) +
   scale_fill_gradient2() +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(model~year) #+
+  ggtitle("Spatial Random Effects") +
+  facet_wrap(~size_bin) #+
 
 # Spatiotemporal random effects
-plot_map(preds_both, epsilon_st) +
+eps <- plot_map(catch_preds, epsilon_st) +
   scale_fill_gradient2() +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(model~month) 
-plot_map(preds_both, epsilon_st) +
-  scale_fill_gradient2() +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(model~year) 
+  ggtitle("Spatiotemporal Random Effects") +
+  facet_grid(size_bin~month) 
 
 
-
-# plot against map
-coast <- rbind(rnaturalearth::ne_states( "United States of America",
-                                         returnclass = "sf"),
-               rnaturalearth::ne_states( "Canada", returnclass = "sf"))
-box <- c(xmin = -128.5, ymin = 48, xmax = -122, ymax = 51)
-coast_trim <- st_crop(coast, box)
-coast_trimUTM <- st_transform(coast_trim, 
-                              crs = "+proj=utm +zone=10 +datum=WGS84")
-
-plot_map(preds3$data, "exp(est)") +
-  scale_fill_viridis_c(trans = "sqrt") +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_wrap(~year_f) +
-  geom_sf(data = coast_trimUTM)
-
-plot_map(preds3$data, "omega_s") +
-  scale_fill_viridis_c() +
-  ggtitle("Spatial random effects only")+
-  geom_point(data = catch_trim, aes(x = xUTM, y = yUTM), colour = "red")
-
-
-## PRESENTATION MAP ------------------------------------------------------------
-
-#inset map
-minLat3 <- min(catch$lat)
-maxLat3 <- max(catch$lat)
-minLong3 <- min(catch$long)
-maxLong3 <- max(catch$long)
-inset_map <- readRDS(here::here("data", "generated_data", "base_map.RDS")) +
-  geom_rect(aes(xmin = minLong3, xmax = maxLong3, ymin = minLat3, 
-                ymax = maxLat3),
-            fill = NA, lty = 2, col = "black") +
-  theme(strip.background = element_rect(colour="white", fill="white"),
-        legend.position = "top",
-        axis.title = element_blank(),
-        axis.ticks = element_blank(),
-        axis.text = element_blank()) +
-  coord_fixed(xlim = c(-128.5, -122), ylim = c(48, 51), ratio = 1.3)
-
-
-#primary map
-min_utm_y <- min(preds3$data$Y) 
-max_utm_y <- max(preds3$data$Y) 
-min_utm_x <- min(preds3$data$X) 
-max_utm_x <- max(preds3$data$X) 
-spatial_effects <- ggplot() +
-  geom_raster(data = preds3$data, aes_string("X", "Y", fill = "omega_s")) +
-  geom_sf(data = coast_trimUTM) +
-  scale_fill_viridis_c(name = "Chinook\nDensity\nAnomaly") +
-  coord_sf(ylim = c(min_utm_y, max_utm_y), xlim = c(min_utm_x, max_utm_x)) +
-  ggsidekick::theme_sleek() + 
-  theme(axis.title = element_blank())
-
-png(here::here("figs", "sdm", "rand_effs_inset.png"), height = 5, width = 5,
-    units = "in", res = 250)
-cowplot::ggdraw() +
-  cowplot::draw_plot(spatial_effects) +
-  cowplot::draw_plot(inset_map, x = 0.1, y = 0.16, width = 0.3, height = 0.3)
+pdf(here::here("figs", "spatial_preds_sizebins.pdf"))
+month_preds
+year_preds
+omega
+eps
 dev.off()
-
-
-## NON-SPATIAL PREDICTIONS -----------------------------------------------------
-
-# starting dataset
-blank_new_dat <- expand.grid(
-  year = unique(catch_trim$year),
-  year_day_z = 0,
-  hour_z = 0,
-  hr_slack_z = 0,
-  mean_depth_z = 0, 
-  sd_depth_z = 0,
-  year_f = levels(catch_trim$year_f),
-  offset = mean(catch_trim$offset)
-)
-
-marg_plot <- function(model, exp_var) {
-  dum <- blank_new_dat %>% 
-    dplyr::select(!{{ exp_var }}) %>% 
-    expand_grid(., 
-                xx = seq(min(catch_trim[ , exp_var]), 
-                         max(catch_trim[ , exp_var]),
-                         length.out = 100)) 
-  dum[ , exp_var] <- dum$xx
-  
-  p <- predict(model, newdata = dum, se_fit = TRUE, re_form = NA)
-  
-  ggplot(p,
-         aes(xx, exp(est),
-                    ymin = exp(est - 1.96 * est_se),
-                    ymax = exp(est + 1.96 * est_se),
-                    colour = year_f)) +
-    coord_cartesian(ylim = c(0, 3.5)) +
-    geom_line(aes(colour = year_f)) +
-    geom_ribbon(aes(fill = year_f), alpha = 0.4)
-}
-
-depth_marg <- marg_plot(model = mod3, exp_var = "mean_depth_z")
-sd_depth_marg <- marg_plot(model = mod3, exp_var = "sd_depth_z")
-year_day_marg <- marg_plot(model = mod3, exp_var = "year_day_z")
-hour_marg <- marg_plot(model = mod3, exp_var = "hour_z")
-hr_slack_marg <- marg_plot(model = mod3, exp_var = "hr_slack_z")
-
