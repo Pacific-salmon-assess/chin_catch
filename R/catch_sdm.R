@@ -70,16 +70,16 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
 chin %>% 
   group_by(size_bin) %>% 
   tally()
-catch_stock %>% 
+chin %>% 
   group_by(agg) %>% 
   tally()
     
 # calculate total catch across size bins
-catch_size <- chin %>% 
+catch_size1 <- chin %>% 
   group_by(event, size_bin) %>% 
   summarize(catch = n(), .groups = "drop") %>% 
   ungroup()
-catch_stock <- chin %>%
+catch_stock1 <- chin %>%
   filter(!is.na(agg),
          fl > 65,
          # remove rare stocks
@@ -96,15 +96,11 @@ set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
   )
 
 
-# import lighthouse data
-# sst <- readRDS(here::here("data", "spatial_data", "trim_amphitrite.rds"))
-
-
-catch <- expand.grid(event = set_dat$event,
-                     size_bin = unique(catch_size$size_bin)) %>% 
-  arrange(event) %>% 
-  left_join(., catch_size, by = c("event", "size_bin")) %>%
-  replace_na(., replace = list(catch = 0)) %>% 
+catch_size <- expand.grid(event = set_dat$event,
+                     size_bin = unique(catch_size$size_bin)) %>%
+  arrange(event) %>%
+  left_join(., catch_size1, by = c("event", "size_bin")) %>%
+  replace_na(., replace = list(catch = 0)) %>%
   left_join(., set_dat, by = "event") %>%
   mutate(
     year_f = as.factor(year),
@@ -114,17 +110,17 @@ catch <- expand.grid(event = set_dat$event,
     depth_z = scale(mean_depth)[ , 1],
     slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1]
-  ) %>% 
+  ) %>%
   # remove sets not on a troller
   filter(!grepl("rec", event))
 
 catch_stock <- expand.grid(
   event = set_dat$event,
   agg = unique(catch_stock$agg)
-) %>% 
-  arrange(event) %>% 
-  left_join(., catch_stock, by = c("event", "agg")) %>%
-  replace_na(., replace = list(catch = 0)) %>% 
+) %>%
+  arrange(event) %>%
+  left_join(., catch_stock1, by = c("event", "agg")) %>%
+  replace_na(., replace = list(catch = 0)) %>%
   left_join(., set_dat, by = "event") %>%
   mutate(
     year_f = as.factor(year),
@@ -134,42 +130,208 @@ catch_stock <- expand.grid(
     depth_z = scale(mean_depth)[ , 1],
     slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1]
-  ) %>% 
+  ) %>%
   # remove sets not on a troller
   filter(!grepl("rec", event))
+ 
 
-
-catch_tbl_size <- as_tibble(catch) %>% 
-  group_by(size_bin) %>% 
-  group_nest() %>% 
-  rename(group_var = size_bin) %>% 
-  mutate(grouping = "size")
-catch_tbl_stock <- as_tibble(catch_stock) %>% 
-  group_by(agg) %>% 
-  group_nest() %>%
-  rename(group_var = agg) %>% 
-  mutate(grouping = "stock")
-catch_tbl <- rbind(catch_tbl_size, catch_tbl_stock)
+# use tbls if size/stock models must be fit separately
+# catch_tbl_size <- as_tibble(catch) %>% 
+#   group_by(size_bin) %>% 
+#   group_nest() %>% 
+#   rename(group_var = size_bin) %>% 
+#   mutate(grouping = "size")
+# catch_tbl_stock <- as_tibble(catch_stock) %>% 
+#   group_by(agg) %>% 
+#   group_nest() %>%
+#   rename(group_var = agg) %>% 
+#   mutate(grouping = "stock")
+# catch_tbl <- rbind(catch_tbl_size, catch_tbl_stock)
 
 
 # BUILD MESHES -----------------------------------------------------------------
 
 # construct a few alternative meshes ( can be applied to all size bins so only 
 # one needed)
-sdm_mesh1 <- make_mesh(catch %>% filter(size_bin == "large"),
+sdm_mesh1 <- make_mesh(catch_size,
                       c("xUTM_ds", "yUTM_ds"),
                       n_knots = 250)
-sdm_mesh2 <- make_mesh(catch %>% filter(size_bin == "large"),
+sdm_mesh2 <- make_mesh(catch_size,
                        c("xUTM_ds", "yUTM_ds"),
                        n_knots = 150)
 
 
+# SPATIAL PREDICTION GRID ------------------------------------------------------
+
+# import 1.8 X 1.8 km grid generated in prep_bathymetry.R in chinTagging repo
+pred_bathy_grid <- readRDS(
+  here::here("data", "pred_bathy_grid_utm.RDS"))
+
+# generate combinations for month/year
+pred_dat <- expand.grid(
+  week = seq(min(catch_size$week), max(catch_size$week), length = 5),
+  year_f = unique(catch_size$year_f),
+  size_bin = unique(catch_size$size_bin),
+  hours_from_slack = median(catch_size$hours_from_slack)
+) %>% 
+  filter(year_f == "2021") 
+
+pred_grid_list <- vector(mode = "list", length = nrow(pred_dat))
+for (i in seq_along(pred_grid_list)) {
+  pred_grid_list[[i]] <- pred_bathy_grid %>% 
+    filter(X < max(catch_size$xUTM + 1000) & X > min(catch_size$xUTM - 1000),
+           Y < max(catch_size$yUTM + 1000) & Y > min(catch_size$yUTM - 1000)) %>% 
+    mutate(week = pred_dat$week[i],
+           year_f = pred_dat$year_f[i],
+           size_bin = pred_dat$size_bin[i])
+}
+
+pred_grid <- pred_grid_list %>% 
+  bind_rows() %>% 
+  mutate(
+    xUTM_ds = X / 1000,
+    yUTM_ds = Y / 1000) %>% 
+  rename(mean_depth = depth, mean_slope = slope)
+
+
+# helper function for simple predictive maps
+plot_map <- function(dat, column) {
+  ggplot() +
+    geom_raster(data = dat, aes(X, Y, fill = {{ column }})) +
+    coord_fixed() +
+    ggsidekick::theme_sleek()
+}
+
+
 # SPATIAL MODELS ---------------------------------------------------------------
+
+fit_size <- sdmTMB(
+  catch ~ (1 | year_f) +
+    size_bin +
+    mean_depth +
+    mean_slope +
+    hours_from_slack 
+  , 
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom2(),
+  spatial = "on",
+  spatial_varying = ~ 1 + size_bin,
+  anisotropy = TRUE,
+  control = sdmTMBcontrol(
+    newton_loops = 1
+    # nlminb_loops = 2
+  ),
+  silent = FALSE
+)
+
+fit_tbl <- tibble(
+  model = c("null", "week", "week_year", "week_year_h"),
+  fe_formula = list(
+    "catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+    hours_from_slack",
+    "catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+    s(week, k = 4)"
+  )
+)
+
+mod_foo <- function(formula_in) {
+  ff <- as.formula(
+    paste(
+      formula_in
+    )
+  )
+  fit_out <- sdmTMB(
+    ff,   
+    offset = "offset",
+    data = catch_size,
+    mesh = sdm_mesh1,
+    family = sdmTMB::nbinom2(),
+    spatial = "on",
+    spatial_varying = ~ 1 + size_bin,
+    anisotropy = TRUE,
+    control = sdmTMBcontrol(
+      newton_loops = 1
+      # nlminb_loops = 2
+    ),
+    silent = FALSE)
+  return(fit_out)
+}
+
+fit_tbl$fits <- vector(mode = "list", length = 4)
+for (i in seq_along(fit_tbl$fe_formula)) {
+  fit_tbl$fits[[4]] <- mod_foo(fit_tbl$fe_formula[[4]])
+}
+
+
+f1 <- fit_tbl$fits[[2]]
+
+# check residuals
+sims <- simulate(f1, nsim = 30)
+dharma_residuals(sims, f1)
+
+
+# fixed week effects
+nd <- expand.grid(
+  year_f = unique(catch_size$year_f),
+  week = seq(min(catch_size$week), max(catch_size$week), length = 30),
+  mean_depth = median(catch_size$mean_depth),
+  mean_slope = median(catch_size$mean_slope),
+  hours_from_slack = 0,
+  size_bin = unique(catch_size$size_bin)
+) %>% 
+  filter(size_bin == "large")
+p <- predict(f1, newdata = nd, se = TRUE, re_form = NA)
+
+ggplot(p, aes(x = week, colour = year_f)) +
+  geom_line(aes(y = exp(est))) +
+  ggsidekick::theme_sleek() 
+
+
+## spatial predictions
+pp <- predict(f1, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+
+plot_map(pp, omega_s) +
+  scale_fill_gradient2()
+plot_map(pp, zeta_s_size_binmedium) +
+  scale_fill_gradient2()
+plot_map(pp, zeta_s_size_binsmall) +
+  scale_fill_gradient2()
+
+plot_map(pp, exp(est)) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  ggtitle("Prediction (fixed effects + all random effects)") +
+  facet_grid(size_bin~week)
+
+
+# SPATIOTEMPORAL MODELS --------------------------------------------------------
+
+st1 <- sdmTMB(
+  catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+    hours_from_slack + s(week, k = 3),   
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom2(),
+  spatial = "on",
+  spatial_varying = ~ 1 + size_bin,
+  time = "month",
+  spatiotemporal = "ar1",
+  anisotropy = TRUE,
+  control = sdmTMBcontrol(
+    newton_loops = 1
+    # nlminb_loops = 2
+  ),
+  silent = FALSE)
+
+
+# SEPARATE SPATIAL MODELS ------------------------------------------------------
 
 ncores <- parallel::detectCores() 
 future::plan(future::multisession, workers = ncores - 3)
 
-sub_tbl <- catch_tbl %>% filter(grouping == "stock")
+# sub_tbl <- catch_tbl %>% filter(grouping == "stock")
 
 sp_fits <- furrr::future_map(
   sub_tbl$data,
@@ -314,36 +476,38 @@ pred_bathy_grid <- readRDS(
   here::here("data", "pred_bathy_grid_utm.RDS"))
 
 # generate combinations for month/year
-month_year <- expand.grid(
-  month = c(5, 6, 7, 8, 9),
-  year_day = c(166, 196, 227, 258),
-  year = unique(catch$year)
-)
+pred_dat <- expand.grid(
+  week = seq(min(catch_size$week), max(catch_size$week), length = 5),
+  year_f = unique(catch_size$year_f),
+  size_bin = unique(catch_size$size_bin)
+) %>% 
+  filter(year_f == "2021") 
 
-pred_grid_list <- vector(mode = "list", length = nrow(month_year))
+pred_grid_list <- vector(mode = "list", length = nrow(pred_dat))
 for (i in seq_along(pred_grid_list)) {
   pred_grid_list[[i]] <- pred_bathy_grid %>% 
-    filter(X < max(catch$xUTM + 1000) & X > min(catch$xUTM - 1000),
-           Y < max(catch$yUTM + 1000) & Y > min(catch$yUTM - 1000)) %>% 
-    mutate(year = month_year$year[i],
-           month = month_year$month[i],
-           year_day = month_year$year_day[i])
+    filter(X < max(catch_size$xUTM + 1000) & X > min(catch_size$xUTM - 1000),
+           Y < max(catch_size$yUTM + 1000) & Y > min(catch_size$yUTM - 1000)) %>% 
+    mutate(week = pred_dat$week[i],
+           year_f = pred_dat$year_f[i],
+           size_bin = pred_dat$size_bin[i])
 }
 
 pred_grid <- pred_grid_list %>% 
   bind_rows() %>% 
   mutate(
     xUTM_ds = X / 1000,
-    yUTM_ds = Y / 1000,
-    coast_dist_km = shore_dist / 1000,
-    hours_from_slack = median(catch$hours_from_slack),
-    moon_illuminated = 0.5,
-    year_f = as.factor(year)
+    yUTM_ds = Y / 1000#,
+    # coast_dist_km = shore_dist / 1000,
+    # hours_from_slack = median(catch$hours_from_slack),
+    # moon_illuminated = 0.5,
+    # year_f = as.factor(year)
   ) %>% 
-  dplyr::select(
-    X, Y, xUTM_ds, yUTM_ds, month, year, year_f, year_day, hours_from_slack, 
-    moon_illuminated, mean_depth = depth, mean_slope = slope
-  )
+  rename(mean_depth = depth, mean_slope = slope)#%>% 
+  # dplyr::select(
+  #   X, Y, xUTM_ds, yUTM_ds, month, year, year_f, year_day, hours_from_slack, 
+  #   moon_illuminated, mean_depth = depth, mean_slope = slope
+  # )
 
 
 ## SPATIAL PREDICTIONS ---------------------------------------------------------
@@ -362,21 +526,13 @@ catch_preds <- catch_tbl %>%
   unnest(cols = c(preds))
 
 
-# helper function for simple predictive maps
-plot_map <- function(dat, column) {
-  ggplot() +
-    geom_raster(data = dat, aes(X, Y, fill = {{ column }})) +
-    coord_fixed() +
-    ggsidekick::theme_sleek()
-}
-
 
 #Predictions incorporating all fixed and random effects
 # Generally the impacts of different meshes considered here were negligible
-month_preds <- plot_map(catch_preds %>% filter(year == "2019"), exp(est)) +
+month_preds <- plot_map(pp, exp(est)) +
   scale_fill_viridis_c(trans = "sqrt") +
   ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(size_bin~month) 
+  facet_grid(size_bin~week) 
 year_preds <- plot_map(catch_preds %>% filter(month == "7"), exp(est)) +
   scale_fill_viridis_c(trans = "sqrt") +
   ggtitle("Prediction (fixed effects + all random effects)") +
