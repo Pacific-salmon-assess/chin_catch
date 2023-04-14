@@ -97,7 +97,7 @@ set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
 
 
 catch_size <- expand.grid(event = set_dat$event,
-                     size_bin = unique(catch_size$size_bin)) %>%
+                     size_bin = unique(catch_size1$size_bin)) %>%
   arrange(event) %>%
   left_join(., catch_size1, by = c("event", "size_bin")) %>%
   replace_na(., replace = list(catch = 0)) %>%
@@ -116,7 +116,7 @@ catch_size <- expand.grid(event = set_dat$event,
 
 catch_stock <- expand.grid(
   event = set_dat$event,
-  agg = unique(catch_stock$agg)
+  agg = unique(catch_stock1$agg)
 ) %>%
   arrange(event) %>%
   left_join(., catch_stock1, by = c("event", "agg")) %>%
@@ -205,19 +205,15 @@ plot_map <- function(dat, column) {
 
 # SPATIAL MODELS ---------------------------------------------------------------
 
-fit_size <- sdmTMB(
-  catch ~ (1 | year_f) +
-    size_bin +
-    mean_depth +
-    mean_slope +
-    hours_from_slack 
-  , 
+f1 <- sdmTMB(
+  catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+    hours_from_slack + s(week, k = 3), 
   offset = "offset",
   data = catch_size,
   mesh = sdm_mesh1,
   family = sdmTMB::nbinom2(),
   spatial = "on",
-  spatial_varying = ~ 1 + size_bin,
+  spatial_varying = ~ 0 + size_bin,
   anisotropy = TRUE,
   control = sdmTMBcontrol(
     newton_loops = 1
@@ -226,46 +222,46 @@ fit_size <- sdmTMB(
   silent = FALSE
 )
 
-fit_tbl <- tibble(
-  model = c("null", "week", "week_year", "week_year_h"),
-  fe_formula = list(
-    "catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-    hours_from_slack",
-    "catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-    s(week, k = 4)"
-  )
-)
-
-mod_foo <- function(formula_in) {
-  ff <- as.formula(
-    paste(
-      formula_in
-    )
-  )
-  fit_out <- sdmTMB(
-    ff,   
-    offset = "offset",
-    data = catch_size,
-    mesh = sdm_mesh1,
-    family = sdmTMB::nbinom2(),
-    spatial = "on",
-    spatial_varying = ~ 1 + size_bin,
-    anisotropy = TRUE,
-    control = sdmTMBcontrol(
-      newton_loops = 1
-      # nlminb_loops = 2
-    ),
-    silent = FALSE)
-  return(fit_out)
-}
-
-fit_tbl$fits <- vector(mode = "list", length = 4)
-for (i in seq_along(fit_tbl$fe_formula)) {
-  fit_tbl$fits[[4]] <- mod_foo(fit_tbl$fe_formula[[4]])
-}
-
-
-f1 <- fit_tbl$fits[[2]]
+# fit_tbl <- tibble(
+#   model = c("null", "week", "week_year", "week_year_h"),
+#   fe_formula = list(
+#     "catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+#     hours_from_slack",
+#     "catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+#     hours_from_slack + s(week, k = 4)"
+#   )
+# )
+# 
+# mod_foo <- function(formula_in) {
+#   ff <- as.formula(
+#     paste(
+#       formula_in
+#     )
+#   )
+#   fit_out <- sdmTMB(
+#     ff,   
+#     offset = "offset",
+#     data = catch_size,
+#     mesh = sdm_mesh1,
+#     family = sdmTMB::nbinom2(),
+#     spatial = "on",
+#     spatial_varying = ~ 1 + size_bin,
+#     anisotropy = TRUE,
+#     control = sdmTMBcontrol(
+#       newton_loops = 1
+#       # nlminb_loops = 2
+#     ),
+#     silent = FALSE)
+#   return(fit_out)
+# }
+# 
+# fit_tbl$fits <- vector(mode = "list", length = 4)
+# for (i in seq_along(fit_tbl$fe_formula)) {
+#   fit_tbl$fits[[4]] <- mod_foo(fit_tbl$fe_formula[[4]])
+# }
+# 
+# 
+# f1 <- fit_tbl$fits[[2]]
 
 # check residuals
 sims <- simulate(f1, nsim = 30)
@@ -309,22 +305,90 @@ plot_map(pp, exp(est)) +
 
 st1 <- sdmTMB(
   catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-    hours_from_slack + s(week, k = 3),   
+    hours_from_slack + month_f,   
   offset = "offset",
   data = catch_size,
   mesh = sdm_mesh1,
   family = sdmTMB::nbinom2(),
   spatial = "on",
-  spatial_varying = ~ 1 + size_bin,
+  spatial_varying = ~ 0 + size_bin,
   time = "month",
   spatiotemporal = "ar1",
-  anisotropy = TRUE,
+  anisotropy = FALSE,
   control = sdmTMBcontrol(
     newton_loops = 1
-    # nlminb_loops = 2
+  ),
+  priors = sdmTMBpriors(
+    phi = halfnormal(0, 10),
+    matern_s = pc_matern(range_gt = 5, sigma_lt = 10),
+    matern_st = pc_matern(range_gt = 5, sigma_lt = 10)
   ),
   silent = FALSE)
 
+st2 <- sdmTMB(
+  catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+    hours_from_slack,   
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom2(),
+  spatial = "off",
+  spatial_varying = ~ 0 + size_bin,
+  time = "month",
+  spatiotemporal = "ar1",
+  time_varying = ~ 1,
+  time_varying_type = "ar1",
+  anisotropy = FALSE,
+  control = sdmTMBcontrol(
+    newton_loops = 1
+  ),
+  priors = sdmTMBpriors(
+    phi = halfnormal(0, 10),
+    matern_s = pc_matern(range_gt = 5, sigma_lt = 10),
+    matern_st = pc_matern(range_gt = 5, sigma_lt = 10)
+  ),
+  silent = FALSE)
+
+
+# MODEL COMPARISON -------------------------------------------------------------
+
+# use CV to compete spatial and spatiotemporal models
+set.seed(2022)
+cv_sp <- sdmTMB_cv(
+    catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+      hours_from_slack + s(week, k = 3), 
+    offset = "offset",
+    data = catch_size,
+    mesh = sdm_mesh1,
+    family = sdmTMB::nbinom2(),
+    spatial = "on",
+    spatial_varying = ~ 0 + size_bin,
+    anisotropy = TRUE,
+    control = sdmTMBcontrol(
+      newton_loops = 1
+    ),
+    silent = FALSE,
+    use_initial_fit = TRUE,
+    k_folds = 5
+  )
+
+cv_st <- sdmTMB_cv(
+  catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
+    hours_from_slack + s(week, k = 3), 
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom2(),
+  spatial = "on",
+  spatial_varying = ~ 0 + size_bin,
+  anisotropy = TRUE,
+  control = sdmTMBcontrol(
+    newton_loops = 1
+  ),
+  silent = FALSE,
+  use_initial_fit = TRUE,
+  k_folds = 5
+)
 
 # SEPARATE SPATIAL MODELS ------------------------------------------------------
 
