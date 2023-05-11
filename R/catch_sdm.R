@@ -54,14 +54,15 @@ fl_preds_mean <- rbind(pred_dat, pred_dat_na) %>%
             .groups = "drop") %>% 
   mutate(stage_predicted = ifelse(med > 0.50 & lo > 0.5, "mature", "immature"))
 
+
 chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>% 
   mutate(
     stage = ifelse(is.na(stage) | stage == "unknown", stage_predicted, stage),
     month = lubridate::month(date),
     size_bin = case_when(
       fl < 65 ~ "small",
-      fl >= 65 & fl < 74 ~ "medium",
-      fl >= 74 ~ "large"
+      fl >= 65 & fl < 75 ~ "medium",
+      fl >= 75 ~ "large"
     )
   ) %>% 
   dplyr::select(fish, vemco_code, event, date, year, month, year_day,
@@ -74,6 +75,7 @@ chin %>%
   group_by(agg) %>% 
   tally()
     
+
 # calculate total catch across size bins
 catch_size1 <- chin %>% 
   group_by(event, size_bin) %>% 
@@ -103,6 +105,14 @@ catch_size <- expand.grid(event = set_dat$event,
   replace_na(., replace = list(catch = 0)) %>%
   left_join(., set_dat, by = "event") %>%
   mutate(
+    size_bin = as.factor(size_bin),
+    # pool undersampled months
+    month_f = case_when(
+      month %in% c(4, 5) ~ 5,
+      month %in% c(8, 9) ~ 8,
+      TRUE ~ month
+    ) %>% 
+      as.factor(),
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
@@ -123,6 +133,13 @@ catch_stock <- expand.grid(
   replace_na(., replace = list(catch = 0)) %>%
   left_join(., set_dat, by = "event") %>%
   mutate(
+    # pool undersampled months
+    month_f = case_when(
+      month %in% c(4, 5) ~ 5,
+      month %in% c(8, 9) ~ 8,
+      TRUE ~ month
+    ) %>% 
+      as.factor(),
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
@@ -149,6 +166,21 @@ catch_stock <- expand.grid(
 # catch_tbl <- rbind(catch_tbl_size, catch_tbl_stock)
 
 
+# EXP FIGS ---------------------------------------------------------------------
+
+ggplot(catch_size) +
+  geom_point(aes(x = week, y = log(catch))) +
+  facet_wrap(~size_bin)
+
+ggplot(catch_size) +
+  geom_point(aes(x = hours_from_slack, y = log(catch))) +
+  facet_wrap(~size_bin)
+
+ggplot(catch_size) +
+  geom_point(aes(x = mean_slope, y = log(catch))) +
+  facet_wrap(~size_bin)
+
+
 # BUILD MESHES -----------------------------------------------------------------
 
 # construct a few alternative meshes ( can be applied to all size bins so only 
@@ -171,10 +203,9 @@ pred_bathy_grid <- readRDS(
 pred_dat <- expand.grid(
   week = seq(min(catch_size$week), max(catch_size$week), length = 5),
   year_f = unique(catch_size$year_f),
-  size_bin = unique(catch_size$size_bin),
-  hours_from_slack = median(catch_size$hours_from_slack)
+  size_bin = unique(catch_size$size_bin)
 ) %>% 
-  filter(year_f == "2021") 
+ filter(year_f == "2021") 
 
 pred_grid_list <- vector(mode = "list", length = nrow(pred_dat))
 for (i in seq_along(pred_grid_list)) {
@@ -190,7 +221,14 @@ pred_grid <- pred_grid_list %>%
   bind_rows() %>% 
   mutate(
     xUTM_ds = X / 1000,
-    yUTM_ds = Y / 1000) %>% 
+    yUTM_ds = Y / 1000,
+    hours_from_slack = median(catch_size$hours_from_slack),
+    month_f = case_when(
+      week <= 22 ~ "5",
+      week > 22 & week <= 26 ~ "6",
+      week > 26 & week <= 30 ~ "7",
+      week > 30 ~ "8"
+    )) %>% 
   rename(mean_depth = depth, mean_slope = slope)
 
 
@@ -205,88 +243,84 @@ plot_map <- function(dat, column) {
 
 # SPATIAL MODELS ---------------------------------------------------------------
 
-f1 <- sdmTMB(
-  catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-    hours_from_slack + s(week, k = 3), 
+f5 <- sdmTMB(
+  catch ~ (1 | year_f) + size_bin + s(hours_from_slack, k = 4) + mean_depth +
+    mean_slope +  week:size_bin, 
   offset = "offset",
   data = catch_size,
   mesh = sdm_mesh1,
   family = sdmTMB::nbinom2(),
-  spatial = "on",
-  spatial_varying = ~ 0 + size_bin,
-  anisotropy = TRUE,
+  spatial = "off",
+  spatial_varying = ~ 0 + size_bin + month_f,
+  anisotropy = FALSE,
   control = sdmTMBcontrol(
-    newton_loops = 1
-    # nlminb_loops = 2
+    newton_loops = 1,
+    map = list(
+      ln_tau_Z = factor(
+        c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
+      )
+    )
   ),
   silent = FALSE
 )
 
-# fit_tbl <- tibble(
-#   model = c("null", "week", "week_year", "week_year_h"),
-#   fe_formula = list(
-#     "catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-#     hours_from_slack",
-#     "catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-#     hours_from_slack + s(week, k = 4)"
-#   )
-# )
-# 
-# mod_foo <- function(formula_in) {
-#   ff <- as.formula(
-#     paste(
-#       formula_in
-#     )
-#   )
-#   fit_out <- sdmTMB(
-#     ff,   
-#     offset = "offset",
-#     data = catch_size,
-#     mesh = sdm_mesh1,
-#     family = sdmTMB::nbinom2(),
-#     spatial = "on",
-#     spatial_varying = ~ 1 + size_bin,
-#     anisotropy = TRUE,
-#     control = sdmTMBcontrol(
-#       newton_loops = 1
-#       # nlminb_loops = 2
-#     ),
-#     silent = FALSE)
-#   return(fit_out)
-# }
-# 
-# fit_tbl$fits <- vector(mode = "list", length = 4)
-# for (i in seq_along(fit_tbl$fe_formula)) {
-#   fit_tbl$fits[[4]] <- mod_foo(fit_tbl$fe_formula[[4]])
-# }
-# 
-# 
-# f1 <- fit_tbl$fits[[2]]
+f5_nb1 <- update(f5, family = sdmTMB::nbinom1())
 
-# check residuals
-sims <- simulate(f1, nsim = 30)
-dharma_residuals(sims, f1)
+
+## CHECKS ----------------------------------------------------------------------
+
+
+# quick check
+sims <- simulate(f5_nb1, nsim = 100)
+dharma_sims <- sims %>% 
+  dharma_residuals(f5_nb1)
+
+
+# sample from posterior using MCMC to avoid Laplace approximation
+object <- f5_nb1
+samp <- sample_mle_mcmc(object, mcmc_iter = 130, mcmc_warmup = 100)
+
+obj <- object$tmb_obj
+random <- unique(names(obj$env$par[obj$env$random]))
+pl <- as.list(object$sd_report, "Estimate")
+fixed <- !(names(pl) %in% random)
+map <- lapply(pl[fixed], function(x) factor(rep(NA, length(x))))
+obj <- TMB::MakeADFun(obj$env$data, pl, map = map, DLL = "sdmTMB")
+obj_mle <- object
+obj_mle$tmb_obj <- obj
+obj_mle$tmb_map <- map
+ss <- simulate(obj_mle, mcmc_samples = extract_mcmc(samp), nsim = 30)
+
+
+pred_fixed <- f5_nb1$family$linkinv(predict(f5_nb1)$est_non_rf)
+r_nb1_size <- DHARMa::createDHARMa(
+  simulatedResponse = ss,
+  observedResponse = f5_nb1$data$catch,
+  fittedPredictedResponse = pred_fixed
+)
+DHARMa::testResiduals(r_nb_size)
 
 
 # fixed week effects
 nd <- expand.grid(
   year_f = unique(catch_size$year_f),
   week = seq(min(catch_size$week), max(catch_size$week), length = 30),
-  mean_depth = median(catch_size$mean_depth),
-  mean_slope = median(catch_size$mean_slope),
+  month_f = unique(catch_size$month_f),
   hours_from_slack = 0,
   size_bin = unique(catch_size$size_bin)
-) %>% 
-  filter(size_bin == "large")
-p <- predict(f1, newdata = nd, se = TRUE, re_form = NA)
+)  %>% 
+  filter(year_f == "2020", month_f == "7")
+p <- predict(f4, newdata = nd, se = TRUE, re_form = NA)
 
-ggplot(p, aes(x = week, colour = year_f)) +
+ggplot(p, aes(x = week)) +
   geom_line(aes(y = exp(est))) +
-  ggsidekick::theme_sleek() 
+  ggsidekick::theme_sleek() +
+  facet_wrap(~size_bin)
 
 
 ## spatial predictions
-pp <- predict(f1, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+pp <- predict(f4, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+pp2 <- predict(f5, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
 
 plot_map(pp, omega_s) +
   scale_fill_gradient2()
@@ -300,182 +334,12 @@ plot_map(pp, exp(est)) +
   ggtitle("Prediction (fixed effects + all random effects)") +
   facet_grid(size_bin~week)
 
-
-# SPATIOTEMPORAL MODELS --------------------------------------------------------
-
-st1 <- sdmTMB(
-  catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-    hours_from_slack + month_f,   
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom2(),
-  spatial = "on",
-  spatial_varying = ~ 0 + size_bin,
-  time = "month",
-  spatiotemporal = "ar1",
-  anisotropy = FALSE,
-  control = sdmTMBcontrol(
-    newton_loops = 1
-  ),
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 10),
-    matern_s = pc_matern(range_gt = 5, sigma_lt = 10),
-    matern_st = pc_matern(range_gt = 5, sigma_lt = 10)
-  ),
-  silent = FALSE)
-
-st2 <- sdmTMB(
-  catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-    hours_from_slack,   
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom2(),
-  spatial = "off",
-  spatial_varying = ~ 0 + size_bin,
-  time = "month",
-  spatiotemporal = "ar1",
-  time_varying = ~ 1,
-  time_varying_type = "ar1",
-  anisotropy = FALSE,
-  control = sdmTMBcontrol(
-    newton_loops = 1
-  ),
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 10),
-    matern_s = pc_matern(range_gt = 5, sigma_lt = 10),
-    matern_st = pc_matern(range_gt = 5, sigma_lt = 10)
-  ),
-  silent = FALSE)
+plot_map(pp2, exp(est)) +
+  scale_fill_viridis_c(trans = "sqrt") +
+  ggtitle("Prediction (fixed effects + all random effects)") +
+  facet_grid(size_bin~week)
 
 
-# MODEL COMPARISON -------------------------------------------------------------
-
-# use CV to compete spatial and spatiotemporal models
-set.seed(2022)
-cv_sp <- sdmTMB_cv(
-    catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-      hours_from_slack + s(week, k = 3), 
-    offset = "offset",
-    data = catch_size,
-    mesh = sdm_mesh1,
-    family = sdmTMB::nbinom2(),
-    spatial = "on",
-    spatial_varying = ~ 0 + size_bin,
-    anisotropy = TRUE,
-    control = sdmTMBcontrol(
-      newton_loops = 1
-    ),
-    silent = FALSE,
-    use_initial_fit = TRUE,
-    k_folds = 5
-  )
-
-cv_st <- sdmTMB_cv(
-  catch ~ (1 | year_f) + size_bin + mean_depth + mean_slope + 
-    hours_from_slack + s(week, k = 3), 
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom2(),
-  spatial = "on",
-  spatial_varying = ~ 0 + size_bin,
-  anisotropy = TRUE,
-  control = sdmTMBcontrol(
-    newton_loops = 1
-  ),
-  silent = FALSE,
-  use_initial_fit = TRUE,
-  k_folds = 5
-)
-
-# SEPARATE SPATIAL MODELS ------------------------------------------------------
-
-ncores <- parallel::detectCores() 
-future::plan(future::multisession, workers = ncores - 3)
-
-# sub_tbl <- catch_tbl %>% filter(grouping == "stock")
-
-sp_fits <- furrr::future_map(
-  sub_tbl$data,
-  ~ sdmTMB(
-    catch ~ (1 | year_f) +
-      mean_depth +
-      hours_from_slack
-      , 
-    offset = "offset",
-    data = .x,
-    mesh = sdm_mesh1,
-    family = sdmTMB::nbinom2(),
-    spatial = "on",
-    anisotropy = FALSE,
-    control = sdmTMBcontrol(
-      newton_loops = 1
-      # nlminb_loops = 2
-    ),
-    silent = FALSE
-  )
-)
-
-purrr::map(sp_fits, sanity)
-# converges well
-
-# residual plots
-purrr::map(
-  sp_fits, 
-  ~ {
-   sims <- simulate(.x, nsim = 30)
-   dharma_residuals(sims, .x)
-  }
-)
-# look good
-
-
-# spatial residuals 
-sp_plots <- purrr::map2(
-  catch_tbl$data,
-  catch_tbl$sp_fits, 
-  ~ {
-    .x$resids <- residuals(.y)
-    ggplot(data = .x) +
-      geom_point(aes(x = xUTM, y = yUTM, colour = resids)) +
-      scale_color_gradient2() +
-      facet_wrap(~year) +
-      ggsidekick::theme_sleek()
-  }
-)
-# also look good
-
-
-## TOTAL CATCH SPATIOTEMPORAL MODELS -------------------------------------------
-
-catch_tbl$st_fits[4:6] <- furrr::future_map(
-  catch_tbl$data[4:6],
-  ~ sdmTMB(
-    catch ~ #0 + year_f 
-      (1 | year_f)# +
-      # mean_depth #+
-      # hours_from_slack
-    , 
-    offset = "offset",
-    data = .x,
-    mesh = sdm_mesh2,
-    family = sdmTMB::nbinom2(),
-    spatial = "on",
-    spatiotemporal = "iid",
-    anisotropy = FALSE,
-    time = "month",
-    control = sdmTMBcontrol(
-      newton_loops = 1
-      # nlminb_loops = 2
-    ),
-    silent = FALSE
-  )
-)
-
-purrr::map(catch_tbl$st_fits[4:6], sanity)
-# converges well
 
 
 ## RESIDUAL CHECKS -------------------------------------------------------------
