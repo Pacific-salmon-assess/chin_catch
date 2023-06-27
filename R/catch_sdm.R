@@ -180,6 +180,14 @@ ggplot(catch_size) +
   geom_point(aes(x = mean_slope, y = log(catch))) +
   facet_wrap(~size_bin)
 
+ggplot(catch_size) +
+  geom_point(aes(x = mean_depth, y = log(catch))) +
+  facet_wrap(~size_bin)
+
+ggplot(catch_size) +
+  geom_point(aes(x = moon_illuminated, y = log(catch))) +
+  facet_wrap(~size_bin)
+
 
 # BUILD MESHES -----------------------------------------------------------------
 
@@ -243,9 +251,10 @@ plot_map <- function(dat, column) {
 
 # SPATIAL MODELS ---------------------------------------------------------------
 
-f5 <- sdmTMB(
-  catch ~ (1 | year_f) + size_bin + s(hours_from_slack, k = 4) + mean_depth +
-    mean_slope +  week:size_bin, 
+f6 <- sdmTMB(
+  catch ~ (1 | year_f) + size_bin + poly(hours_from_slack, 2) + 
+    poly(mean_depth, 2) + poly(moon_illuminated, 2) +
+    mean_slope + week:size_bin, 
   offset = "offset",
   data = catch_size,
   mesh = sdm_mesh1,
@@ -264,20 +273,21 @@ f5 <- sdmTMB(
   silent = FALSE
 )
 
-f5_nb1 <- update(f5, family = sdmTMB::nbinom1())
+
+f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 
 
 ## CHECKS ----------------------------------------------------------------------
 
 
 # quick check
-sims <- simulate(f5_nb1, nsim = 100)
+sims <- simulate(f6_nb1, nsim = 100)
 dharma_sims <- sims %>% 
-  dharma_residuals(f5_nb1)
+  dharma_residuals(f6_nb1)
 
 
 # sample from posterior using MCMC to avoid Laplace approximation
-object <- f5_nb1
+object <- f6_nb1
 samp <- sample_mle_mcmc(object, mcmc_iter = 130, mcmc_warmup = 100)
 
 obj <- object$tmb_obj
@@ -292,10 +302,10 @@ obj_mle$tmb_map <- map
 ss <- simulate(obj_mle, mcmc_samples = extract_mcmc(samp), nsim = 30)
 
 
-pred_fixed <- f5_nb1$family$linkinv(predict(f5_nb1)$est_non_rf)
+pred_fixed <- f6_nb1$family$linkinv(predict(f6_nb1)$est_non_rf)
 r_nb1_size <- DHARMa::createDHARMa(
   simulatedResponse = ss,
-  observedResponse = f5_nb1$data$catch,
+  observedResponse = f6_nb1$data$catch,
   fittedPredictedResponse = pred_fixed
 )
 DHARMa::testResiduals(r_nb_size)
