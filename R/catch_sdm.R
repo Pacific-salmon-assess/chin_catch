@@ -231,6 +231,7 @@ pred_grid <- pred_grid_list %>%
     xUTM_ds = X / 1000,
     yUTM_ds = Y / 1000,
     hours_from_slack = median(catch_size$hours_from_slack),
+    moon_illuminated = 0.5,
     month_f = case_when(
       week <= 22 ~ "5",
       week > 22 & week <= 26 ~ "6",
@@ -273,16 +274,18 @@ f6 <- sdmTMB(
   silent = FALSE
 )
 
-
 f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 
 
-## CHECKS ----------------------------------------------------------------------
-
+## SIMULATION CHECKS -----------------------------------------------------------
 
 # quick check
-sims <- simulate(f6_nb1, nsim = 100)
-dharma_sims <- sims %>% 
+sims_nb2 <- simulate(f6, nsim = 100)
+sims_nb2 %>% 
+  dharma_residuals(f6)
+
+sims_nb1 <- simulate(f6_nb1, nsim = 100)
+sims_nb1 %>% 
   dharma_residuals(f6_nb1)
 
 
@@ -311,44 +314,103 @@ r_nb1_size <- DHARMa::createDHARMa(
 DHARMa::testResiduals(r_nb_size)
 
 
-# fixed week effects
-nd <- expand.grid(
-  year_f = unique(catch_size$year_f),
-  week = seq(min(catch_size$week), max(catch_size$week), length = 30),
-  month_f = unique(catch_size$month_f),
-  hours_from_slack = 0,
-  size_bin = unique(catch_size$size_bin)
-)  %>% 
-  filter(year_f == "2020", month_f == "7")
-p <- predict(f4, newdata = nd, se = TRUE, re_form = NA)
+## FIXED EFFECT PREDICTIONS ----------------------------------------------------
 
-ggplot(p, aes(x = week)) +
-  geom_line(aes(y = exp(est))) +
+# NOTE month and year values don't matter since random variables and integrated 
+# out
+
+# fixed week effects
+nd_week <- expand.grid(
+  year_f = "2020",
+  week = seq(min(catch_size$week), max(catch_size$week), length = 30),
+  month_f = "7",
+  hours_from_slack = 0,
+  moon_illuminated = 0.5,
+  size_bin = unique(catch_size$size_bin),
+  mean_depth = median(catch_size$mean_depth),
+  mean_slope = median(catch_size$mean_slope)
+) 
+
+p <- predict(f6_nb1, newdata = nd_week, se_fit = TRUE, re_form = NA)
+
+ggplot(
+  p, 
+  aes(x = week, y = exp(est), ymin = exp(est - 1.96 * est_se), 
+      ymax = exp(est + 1.96 * est_se))
+) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
   ggsidekick::theme_sleek() +
   facet_wrap(~size_bin)
 
 
-## spatial predictions
-pp <- predict(f4, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
-pp2 <- predict(f5, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+# fixed depth effects
+nd_depth <- expand.grid(
+  year_f = unique(catch_size$year_f),
+  week = median(catch_size$week),
+  month_f = unique(catch_size$month_f),
+  hours_from_slack = 0,
+  moon_illuminated = 0.5,
+  size_bin = unique(catch_size$size_bin),
+  mean_depth = seq(min(catch_size$mean_depth), max(catch_size$mean_depth), 
+                   length = 30),
+  mean_slope = median(catch_size$mean_slope)
+) %>% 
+  filter(size_bin == "medium", year_f == "2020", month_f == "7")
 
-plot_map(pp, omega_s) +
+p_depth <- predict(f6_nb1, newdata = nd_depth, se_fit = TRUE, re_form = NA)
+ggplot(
+  p_depth, 
+  aes(x = mean_depth, y = exp(est), ymin = exp(est - 1.96 * est_se), 
+      ymax = exp(est + 1.96 * est_se))
+) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  ggsidekick::theme_sleek() 
+
+
+# fixed slope effects
+nd_slope <- nd_depth %>% 
+  mutate(
+    mean_slope = seq(min(catch_size$mean_slope), max(catch_size$mean_slope), 
+                     length = 30),
+    mean_depth = median(catch_size$mean_depth)
+  )
+
+p_slope <- predict(f6_nb1, newdata = nd_slope, se_fit = TRUE, re_form = NA)
+ggplot(
+  p_slope, 
+  aes(x = mean_depth, y = exp(est), ymin = exp(est - 1.96 * est_se), 
+      ymax = exp(est + 1.96 * est_se))
+) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  ggsidekick::theme_sleek() 
+
+
+
+## SPATIAL PREDICTIONS ---------------------------------------------------------
+
+pp <- predict(f6_nb1, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+
+plot_map(pp, zeta_s_size_binlarge) +
   scale_fill_gradient2()
 plot_map(pp, zeta_s_size_binmedium) +
   scale_fill_gradient2()
 plot_map(pp, zeta_s_size_binsmall) +
   scale_fill_gradient2()
 
+plot_map(pp, zeta_s_month_f6) +
+  scale_fill_gradient2()
+plot_map(pp, zeta_s_month_f7) +
+  scale_fill_gradient2()
+plot_map(pp, zeta_s_month_f8) +
+  scale_fill_gradient2()
+
 plot_map(pp, exp(est)) +
   scale_fill_viridis_c(trans = "sqrt") +
   ggtitle("Prediction (fixed effects + all random effects)") +
   facet_grid(size_bin~week)
-
-plot_map(pp2, exp(est)) +
-  scale_fill_viridis_c(trans = "sqrt") +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(size_bin~week)
-
 
 
 
