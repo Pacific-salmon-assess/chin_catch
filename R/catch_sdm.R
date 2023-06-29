@@ -189,6 +189,11 @@ ggplot(catch_size) +
   facet_wrap(~size_bin)
 
 
+# NON-MODEL FIGS ---------------------------------------------------------------
+
+
+
+
 # BUILD MESHES -----------------------------------------------------------------
 
 # construct a few alternative meshes ( can be applied to all size bins so only 
@@ -231,6 +236,7 @@ pred_grid <- pred_grid_list %>%
     xUTM_ds = X / 1000,
     yUTM_ds = Y / 1000,
     hours_from_slack = median(catch_size$hours_from_slack),
+    moon_illuminated = 0.5,
     month_f = case_when(
       week <= 22 ~ "5",
       week > 22 & week <= 26 ~ "6",
@@ -247,6 +253,15 @@ plot_map <- function(dat, column) {
     coord_fixed() +
     ggsidekick::theme_sleek()
 }
+
+ggplot() +
+  geom_raster(data = pred_grid, aes(X, Y, fill = mean_depth)) +
+  geom_point(data = set_dat %>%
+               filter(!grepl("rec", event)), 
+             aes(xUTM, yUTM, colour = as.factor(year)),
+             alpha = 0.4) +
+  coord_fixed() +
+  ggsidekick::theme_sleek()
 
 
 # SPATIAL MODELS ---------------------------------------------------------------
@@ -273,16 +288,18 @@ f6 <- sdmTMB(
   silent = FALSE
 )
 
-
 f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 
 
-## CHECKS ----------------------------------------------------------------------
-
+## SIMULATION CHECKS -----------------------------------------------------------
 
 # quick check
-sims <- simulate(f6_nb1, nsim = 100)
-dharma_sims <- sims %>% 
+# sims_nb2 <- simulate(f6, nsim = 100)
+# sims_nb2 %>% 
+#   dharma_residuals(f6)
+
+sims_nb1 <- simulate(f6_nb1, nsim = 100)
+sims_nb1 %>% 
   dharma_residuals(f6_nb1)
 
 
@@ -302,41 +319,145 @@ obj_mle$tmb_map <- map
 ss <- simulate(obj_mle, mcmc_samples = extract_mcmc(samp), nsim = 30)
 
 
-pred_fixed <- f6_nb1$family$linkinv(predict(f6_nb1)$est_non_rf)
+pred_fixed <- f6_nb1$family$linkinv(
+  predict(f6_nb1, newdata = catch_size)$est_non_rf
+)
 r_nb1_size <- DHARMa::createDHARMa(
   simulatedResponse = ss,
   observedResponse = f6_nb1$data$catch,
   fittedPredictedResponse = pred_fixed
 )
-DHARMa::testResiduals(r_nb_size)
+DHARMa::testResiduals(r_nb1_size)
 
+
+## FIXED EFFECT PREDICTIONS ----------------------------------------------------
+
+# NOTE month and year values don't matter since random variables and integrated 
+# out
 
 # fixed week effects
-nd <- expand.grid(
-  year_f = unique(catch_size$year_f),
+nd_week <- expand.grid(
+  year_f = "2020",
   week = seq(min(catch_size$week), max(catch_size$week), length = 30),
-  month_f = unique(catch_size$month_f),
+  month_f = "7",
   hours_from_slack = 0,
-  size_bin = unique(catch_size$size_bin)
-)  %>% 
-  filter(year_f == "2020", month_f == "7")
-p <- predict(f4, newdata = nd, se = TRUE, re_form = NA)
+  moon_illuminated = 0.5,
+  size_bin = unique(catch_size$size_bin),
+  mean_depth = median(catch_size$mean_depth),
+  mean_slope = median(catch_size$mean_slope)
+) 
 
-ggplot(p, aes(x = week)) +
-  geom_line(aes(y = exp(est))) +
+p <- predict(f6_nb1, newdata = nd_week, se_fit = TRUE, re_form = NA)
+
+ggplot(
+  p, 
+  aes(x = week, y = exp(est), ymin = exp(est - 1.96 * est_se), 
+      ymax = exp(est + 1.96 * est_se))
+) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
   ggsidekick::theme_sleek() +
   facet_wrap(~size_bin)
 
 
-## spatial predictions
-pp <- predict(f4, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
-pp2 <- predict(f5, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+# fixed depth effects
+nd_depth <- expand.grid(
+  year_f = unique(catch_size$year_f),
+  week = median(catch_size$week),
+  month_f = unique(catch_size$month_f),
+  hours_from_slack = 0,
+  moon_illuminated = 0.5,
+  size_bin = unique(catch_size$size_bin),
+  mean_depth = seq(min(catch_size$mean_depth), max(catch_size$mean_depth), 
+                   length = 30),
+  mean_slope = median(catch_size$mean_slope)
+) %>% 
+  filter(size_bin == "medium", year_f == "2020", month_f == "7")
 
-plot_map(pp, omega_s) +
+p_depth <- predict(f6_nb1, newdata = nd_depth, se_fit = TRUE, re_form = NA)
+ggplot(
+  p_depth, 
+  aes(x = mean_depth, y = exp(est), ymin = exp(est - 1.96 * est_se), 
+      ymax = exp(est + 1.96 * est_se))
+) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  ggsidekick::theme_sleek() 
+
+
+# fixed slope effects
+nd_slope <- nd_depth %>% 
+  mutate(
+    mean_slope = seq(min(catch_size$mean_slope), max(catch_size$mean_slope), 
+                     length = 30),
+    mean_depth = median(catch_size$mean_depth)
+  )
+
+p_slope <- predict(f6_nb1, newdata = nd_slope, se_fit = TRUE, re_form = NA)
+ggplot(
+  p_slope, 
+  aes(x = mean_slope, y = exp(est), ymin = exp(est - 1.96 * est_se), 
+      ymax = exp(est + 1.96 * est_se))
+) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  ggsidekick::theme_sleek() 
+
+
+# fixed slack effects
+nd_slack <- nd_depth %>% 
+  mutate(
+    hours_from_slack = seq(min(catch_size$hours_from_slack), 
+                           max(catch_size$hours_from_slack), 
+                           length = 30),
+    mean_depth = median(catch_size$mean_depth)
+  )
+
+p_slack <- predict(f6_nb1, newdata = nd_slack, se_fit = TRUE, re_form = NA)
+ggplot(
+  p_slack, 
+  aes(x = hours_from_slack, y = exp(est), ymin = exp(est - 1.96 * est_se), 
+      ymax = exp(est + 1.96 * est_se))
+) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  ggsidekick::theme_sleek() 
+
+
+# fixed lunar effects
+nd_moon <- nd_depth %>% 
+  mutate(
+    moon_illuminated = seq(0, 1, length = 30),
+    mean_depth = median(catch_size$mean_depth)
+  )
+
+p_moon <- predict(f6_nb1, newdata = nd_moon, se_fit = TRUE, re_form = NA)
+ggplot(
+  p_moon, 
+  aes(x = moon_illuminated, y = exp(est), ymin = exp(est - 1.96 * est_se), 
+      ymax = exp(est + 1.96 * est_se))
+) +
+  geom_line() +
+  geom_ribbon(alpha = 0.4) +
+  ggsidekick::theme_sleek() 
+
+
+## SPATIAL PREDICTIONS ---------------------------------------------------------
+
+pp <- predict(f6_nb1, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+
+plot_map(pp, zeta_s_size_binlarge) +
   scale_fill_gradient2()
 plot_map(pp, zeta_s_size_binmedium) +
   scale_fill_gradient2()
 plot_map(pp, zeta_s_size_binsmall) +
+  scale_fill_gradient2()
+
+plot_map(pp, zeta_s_month_f6) +
+  scale_fill_gradient2()
+plot_map(pp, zeta_s_month_f7) +
+  scale_fill_gradient2()
+plot_map(pp, zeta_s_month_f8) +
   scale_fill_gradient2()
 
 plot_map(pp, exp(est)) +
@@ -344,68 +465,7 @@ plot_map(pp, exp(est)) +
   ggtitle("Prediction (fixed effects + all random effects)") +
   facet_grid(size_bin~week)
 
-plot_map(pp2, exp(est)) +
-  scale_fill_viridis_c(trans = "sqrt") +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(size_bin~week)
 
-
-
-
-## RESIDUAL CHECKS -------------------------------------------------------------
-
-# residual plots
-purrr::map(
-  catch_tbl$st_fits, 
-  ~ {
-    sims <- simulate(.x, nsim = 30)
-    dharma_residuals(sims, .x)
-  }
-)
-# look good
-
-
-# spatial residuals 
-sp_plots <- purrr::map2(
-  catch_tbl$data,
-  catch_tbl$st_fits, 
-  ~ {
-    .x$resids <- residuals(.y)
-    ggplot(data = .x) +
-      geom_point(aes(x = xUTM, y = yUTM, colour = resids)) +
-      scale_color_gradient2() +
-      facet_wrap(~year) +
-      ggsidekick::theme_sleek()
-  }
-)
-# also look good
-
-purrr::map(
-  catch_tbl$st_fits, 
-  ~ {
-    sims <- simulate(.x, nsim = 30)
-    breaks_vec <- c(seq(0, 16, by = 1))
-    hist(sims[ , 1], col="green", pch=20, cex=4, 
-         breaks = breaks_vec)
-    hist(catch$catch, pch=20, cex=4, col=rgb(1,0,0,0.5), add=TRUE, 
-         breaks = breaks_vec)
-    }
-)
-
-
-
-## FIXED EFFECTS ---------------------------------------------------------------
-
-for (i in 1:nrow(catch_tbl)) {
-  file_name <- paste(catch_tbl$size_bin[[i]], "st_fixed_effects.pdf", sep = "_")
-  pdf(here::here("figs", file_name))
-  visreg::visreg(catch_tbl$st_fits[[i]], 
-                 xvar = "hours_from_slack", scale = "response")
-  visreg::visreg(catch_tbl$st_fits[[i]], 
-                 xvar = "mean_depth", scale = "response")
-  dev.off()
-}
-  
 
 # PREDICTION GRID --------------------------------------------------------------
 
