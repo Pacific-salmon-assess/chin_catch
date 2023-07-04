@@ -55,6 +55,9 @@ catch_size <- expand.grid(event = set_dat$event,
   left_join(., catch_size1, by = c("event", "size_bin")) %>%
   replace_na(., replace = list(catch = 0)) %>%
   left_join(., set_dat, by = "event") %>%
+  # remove sets not on a troller and tacking
+  filter(!grepl("rec", event),
+         !tack == "yes") %>% 
   mutate(
     size_bin = as.factor(size_bin),
     # pool undersampled months
@@ -69,12 +72,11 @@ catch_size <- expand.grid(event = set_dat$event,
     xUTM_ds = xUTM / 1000,
     offset = log(set_dist),
     depth_z = scale(mean_depth)[ , 1],
+    slope_z = scale(mean_slope)[ , 1],
     slack_z = scale(hours_from_slack)[ , 1],
-    week_z = scale(week)[ , 1]
-  ) %>%
-  # remove sets not on a troller and tacking
-  filter(!grepl("rec", event),
-         !tack == "yes")
+    week_z = scale(week)[ , 1],
+    moon_z = scale(moon_illuminated)[ , 1]
+  ) 
 
 catch_stock <- expand.grid(
   event = set_dat$event,
@@ -84,6 +86,9 @@ catch_stock <- expand.grid(
   left_join(., catch_stock1, by = c("event", "agg")) %>%
   replace_na(., replace = list(catch = 0)) %>%
   left_join(., set_dat, by = "event") %>%
+  # remove sets not on a troller and tacking
+  filter(!grepl("rec", event),
+         !tack == "yes") %>%
   mutate(
     # pool undersampled months
     month_f = case_when(
@@ -97,12 +102,11 @@ catch_stock <- expand.grid(
     xUTM_ds = xUTM / 1000,
     offset = log(set_dist),
     depth_z = scale(mean_depth)[ , 1],
+    slope_z = scale(mean_slope)[ , 1],
     slack_z = scale(hours_from_slack)[ , 1],
-    week_z = scale(week)[ , 1]
-  ) %>%
-  # remove sets not on a troller and tacking
-  filter(!grepl("rec", event),
-         !tack == "yes")
+    week_z = scale(week)[ , 1],
+    moon_z = scale(moon_illuminated)[ , 1]
+  ) 
  
 
 # EXP FIGS ---------------------------------------------------------------------
@@ -202,9 +206,9 @@ ggplot() +
 # SPATIAL MODELS ---------------------------------------------------------------
 
 f6 <- sdmTMB(
-  catch ~ (1 | year_f) + size_bin + poly(hours_from_slack, 2) + 
-    poly(mean_depth, 2) + poly(moon_illuminated, 2) +
-    mean_slope + week:size_bin, 
+  catch ~ (1 | year_f) + size_bin + poly(hours_from_slack, 2) +
+    mean_depth + poly(moon_illuminated, 2) +
+    mean_slope + week:size_bin,
   offset = "offset",
   data = catch_size,
   mesh = sdm_mesh1,
@@ -225,6 +229,27 @@ f6 <- sdmTMB(
 
 f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 
+# f6_nb1 <- sdmTMB(
+#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) + 
+#     poly(depth_z, 2) + poly(moon_z, 2) +
+#     slope_z + week_z:size_bin, 
+#   offset = "offset",
+#   data = catch_size,
+#   mesh = sdm_mesh1,
+#   family = sdmTMB::nbinom1(),
+#   spatial = "off",
+#   spatial_varying = ~ 0 + size_bin + month_f,
+#   anisotropy = FALSE,
+#   control = sdmTMBcontrol(
+#     newton_loops = 1,
+#     map = list(
+#       ln_tau_Z = factor(
+#         c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
+#       )
+#     )
+#   ),
+#   silent = FALSE
+# )
 
 ## SIMULATION CHECKS -----------------------------------------------------------
 
@@ -266,6 +291,26 @@ DHARMa::testResiduals(r_nb1_size)
 
 
 ## FIXED EFFECT PREDICTIONS ----------------------------------------------------
+
+# quick visualization of effect size estimates 
+fes <- tidy(f6_nb1, effects = "fixed", conf.int = T)
+
+fes %>% 
+  filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall", 
+                      "(Intercept)")) %>% 
+  ggplot(., aes(y = term, x = estimate)) +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high))
+
+
+# quick visualization of effect size estimates 
+res <- tidy(f6_nb1, effects = "ran_par", conf.int = T)
+
+res %>% 
+  filter(!term %in% c("range")) %>%
+  ggplot(., aes(y = term, x = estimate)) +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high))
+
+
 
 # NOTE month and year values don't matter since random variables and integrated 
 # out
