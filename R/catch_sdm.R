@@ -14,59 +14,10 @@ library(raster)
 library(sf)
 library(sdmTMBextra)
 
-# Import stage data and fitted model generated in gen_detection_histories.R
-stage_dat <- readRDS(here::here("data", "agg_lifestage_df.RDS")) %>% 
-  dplyr::select(vemco_code, stage)
 
+chin <- readRDS(here::here("data", "clean_catch.RDS")) %>% 
+  rename(agg = agg_name)
 
-chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
-  mutate(year_day = lubridate::yday(date)) %>% 
-  rename(vemco_code = acoustic_year, agg = agg_name) %>% 
-  left_join(., stage_dat, by = "vemco_code") 
-
-
-## predict life stage based on fitted model 
-stage_mod <- readRDS(here::here("data", "stage_fl_hierA.RDS"))
-# include RIs when stock ID is known
-pred_dat <- tidybayes::add_epred_draws(
-  object = stage_mod,
-  newdata = chin_raw %>% 
-    filter(is.na(stage) | stage == "unknown",
-           !is.na(agg)),
-  re_formula = NULL, #scale = "response", 
-  ndraws = 100
-)
-# otherwise marginalize RIs
-pred_dat_na <- tidybayes::add_epred_draws(
-  object = stage_mod,
-  newdata = chin_raw %>% 
-    filter(is.na(stage) | stage == "unknown",
-           is.na(agg)),
-  re_formula = NA, #scale = "response", 
-  ndraws = 100
-)
-
-fl_preds_mean <- rbind(pred_dat, pred_dat_na) %>% 
-  group_by(fish) %>% 
-  summarize(med = median(.epred), 
-            lo = quantile(.epred, prob = 0.05),
-            up = quantile(.epred, prob = 0.95),
-            .groups = "drop") %>% 
-  mutate(stage_predicted = ifelse(med > 0.50 & lo > 0.5, "mature", "immature"))
-
-
-chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>% 
-  mutate(
-    stage = ifelse(is.na(stage) | stage == "unknown", stage_predicted, stage),
-    month = lubridate::month(date),
-    size_bin = case_when(
-      fl < 65 ~ "small",
-      fl >= 65 & fl < 75 ~ "medium",
-      fl >= 75 ~ "large"
-    )
-  ) %>% 
-  dplyr::select(fish, vemco_code, event, date, year, month, year_day,
-                fl, size_bin, clip, stage, stock:agg_prob) 
 
 chin %>% 
   group_by(size_bin) %>% 
@@ -121,8 +72,9 @@ catch_size <- expand.grid(event = set_dat$event,
     slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1]
   ) %>%
-  # remove sets not on a troller
-  filter(!grepl("rec", event))
+  # remove sets not on a troller and tacking
+  filter(!grepl("rec", event),
+         !tack == "yes")
 
 catch_stock <- expand.grid(
   event = set_dat$event,
@@ -148,23 +100,10 @@ catch_stock <- expand.grid(
     slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1]
   ) %>%
-  # remove sets not on a troller
-  filter(!grepl("rec", event))
+  # remove sets not on a troller and tacking
+  filter(!grepl("rec", event),
+         !tack == "yes")
  
-
-# use tbls if size/stock models must be fit separately
-# catch_tbl_size <- as_tibble(catch) %>% 
-#   group_by(size_bin) %>% 
-#   group_nest() %>% 
-#   rename(group_var = size_bin) %>% 
-#   mutate(grouping = "size")
-# catch_tbl_stock <- as_tibble(catch_stock) %>% 
-#   group_by(agg) %>% 
-#   group_nest() %>%
-#   rename(group_var = agg) %>% 
-#   mutate(grouping = "stock")
-# catch_tbl <- rbind(catch_tbl_size, catch_tbl_stock)
-
 
 # EXP FIGS ---------------------------------------------------------------------
 
@@ -187,10 +126,6 @@ ggplot(catch_size) +
 ggplot(catch_size) +
   geom_point(aes(x = moon_illuminated, y = log(catch))) +
   facet_wrap(~size_bin)
-
-
-# NON-MODEL FIGS ---------------------------------------------------------------
-
 
 
 
@@ -337,27 +272,21 @@ DHARMa::testResiduals(r_nb1_size)
 
 # fixed week effects
 nd_week <- expand.grid(
-  year_f = "2020",
+  year_f = unique(catch_size$year_f), #"2020",
   week = seq(min(catch_size$week), max(catch_size$week), length = 30),
-  month_f = "7",
+  month_f = unique(catch_size$month_f), #"7",
   hours_from_slack = 0,
   moon_illuminated = 0.5,
   size_bin = unique(catch_size$size_bin),
   mean_depth = median(catch_size$mean_depth),
   mean_slope = median(catch_size$mean_slope)
-) 
+) %>% 
+  filter(year_f == "2020", 
+         month_f == "7")
 
-p <- predict(f6_nb1, newdata = nd_week, se_fit = TRUE, re_form = NA)
-
-ggplot(
-  p, 
-  aes(x = week, y = exp(est), ymin = exp(est - 1.96 * est_se), 
-      ymax = exp(est + 1.96 * est_se))
-) +
-  geom_line() +
-  geom_ribbon(alpha = 0.4) +
-  ggsidekick::theme_sleek() +
-  facet_wrap(~size_bin)
+p <- predict(f6_nb1, newdata = nd_week, se_fit = TRUE, 
+             re_form = NA, re_form_iid = NA)
+p$variable <- "week"
 
 
 # fixed depth effects
@@ -374,16 +303,9 @@ nd_depth <- expand.grid(
 ) %>% 
   filter(size_bin == "medium", year_f == "2020", month_f == "7")
 
-p_depth <- predict(f6_nb1, newdata = nd_depth, se_fit = TRUE, re_form = NA)
-ggplot(
-  p_depth, 
-  aes(x = mean_depth, y = exp(est), ymin = exp(est - 1.96 * est_se), 
-      ymax = exp(est + 1.96 * est_se))
-) +
-  geom_line() +
-  geom_ribbon(alpha = 0.4) +
-  ggsidekick::theme_sleek() 
-
+p_depth <- predict(f6_nb1, newdata = nd_depth, se_fit = TRUE, 
+                   re_form = NA, re_form_iid = NA)
+p_depth$variable <- "mean_depth"
 
 # fixed slope effects
 nd_slope <- nd_depth %>% 
@@ -392,17 +314,9 @@ nd_slope <- nd_depth %>%
                      length = 30),
     mean_depth = median(catch_size$mean_depth)
   )
-
-p_slope <- predict(f6_nb1, newdata = nd_slope, se_fit = TRUE, re_form = NA)
-ggplot(
-  p_slope, 
-  aes(x = mean_slope, y = exp(est), ymin = exp(est - 1.96 * est_se), 
-      ymax = exp(est + 1.96 * est_se))
-) +
-  geom_line() +
-  geom_ribbon(alpha = 0.4) +
-  ggsidekick::theme_sleek() 
-
+p_slope <- predict(f6_nb1, newdata = nd_slope, se_fit = TRUE, 
+                   re_form = NA, re_form_iid = NA)
+p_slope$variable <- "mean_slope"
 
 # fixed slack effects
 nd_slack <- nd_depth %>% 
@@ -413,16 +327,9 @@ nd_slack <- nd_depth %>%
     mean_depth = median(catch_size$mean_depth)
   )
 
-p_slack <- predict(f6_nb1, newdata = nd_slack, se_fit = TRUE, re_form = NA)
-ggplot(
-  p_slack, 
-  aes(x = hours_from_slack, y = exp(est), ymin = exp(est - 1.96 * est_se), 
-      ymax = exp(est + 1.96 * est_se))
-) +
-  geom_line() +
-  geom_ribbon(alpha = 0.4) +
-  ggsidekick::theme_sleek() 
-
+p_slack <- predict(f6_nb1, newdata = nd_slack, se_fit = TRUE, 
+                   re_form = NA, re_form_iid = NA)
+p_slack$variable <- "hours_from_slack"
 
 # fixed lunar effects
 nd_moon <- nd_depth %>% 
@@ -430,16 +337,71 @@ nd_moon <- nd_depth %>%
     moon_illuminated = seq(0, 1, length = 30),
     mean_depth = median(catch_size$mean_depth)
   )
+p_moon <- predict(f6_nb1, newdata = nd_moon, se_fit = TRUE, 
+                  re_form = NA, re_form_iid = NA)
+p_moon$variable <- "moon_illuminated"
 
-p_moon <- predict(f6_nb1, newdata = nd_moon, se_fit = TRUE, re_form = NA)
-ggplot(
-  p_moon, 
-  aes(x = moon_illuminated, y = exp(est), ymin = exp(est - 1.96 * est_se), 
-      ymax = exp(est + 1.96 * est_se))
-) +
-  geom_line() +
-  geom_ribbon(alpha = 0.4) +
-  ggsidekick::theme_sleek() 
+
+full_p <- list(p, p_depth, p_slope, p_slack, p_moon) %>% 
+  do.call(rbind, .) %>%
+  group_by(size_bin, variable) %>% 
+  mutate(
+    exp_est = exp(est),
+    max_est = max(exp_est),
+    scale_est = exp_est / max_est,
+    up = (est + 1.96 * est_se),
+    lo = (est - 1.96 * est_se),
+    scale_up = exp(up) / max_est,
+    scale_lo = exp(lo) / max_est
+  ) 
+
+# plots
+plot_foo <- function(var_in = "week", x_lab = "Week") {
+  var_in2 <- rlang::enquo(var_in)
+  dum <- full_p %>% 
+    filter(variable == !!var_in2)
+  ggplot(
+    dum, 
+    aes(x = dum[[var_in]], y = scale_est, ymin = scale_up, 
+        ymax = scale_lo)
+  ) +
+    geom_line() +
+    labs(x = x_lab) +
+    geom_ribbon(alpha = 0.4) +
+    ggsidekick::theme_sleek() +
+    coord_cartesian(y = c(0.03, 2)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = c(0, 0)) +
+    theme(axis.title.y = element_blank())
+}
+
+week_plot <- plot_foo(var_in = "week", x_lab = "Week") +
+  facet_wrap(~size_bin) +
+  theme(axis.title.y = element_text(angle = 90)) +
+  ylab("Scaled Abundance")
+depth_plot <- plot_foo(var_in = "mean_depth", x_lab = "Bottom Depth")
+slope_plot <- plot_foo(var_in = "mean_slope", x_lab = "Bottom Slope")
+slack_plot <- plot_foo(var_in = "hours_from_slack", x_lab = "Hours From Slack")
+moon_plot <- plot_foo(var_in = "moon_illuminated", 
+                      x_lab = "Proportion Moon Illuminated")
+
+p1 <- cowplot::plot_grid(
+  depth_plot, slope_plot, slack_plot, moon_plot,
+  ncol = 2
+)
+
+png(here::here("figs", "ms_figs", "week_fe.png"), res = 250, units = "in", 
+    height = 2.75, width = 5.5)
+week_plot
+dev.off()
+
+png(here::here("figs", "ms_figs", "other_fes.png"), res = 250, units = "in", 
+    height = 5.5, width = 5.5)
+gridExtra::grid.arrange(
+  gridExtra::arrangeGrob(p1, 
+                         left = grid::textGrob("Scaled Abundance", rot = 90)))
+dev.off()
+
 
 
 ## SPATIAL PREDICTIONS ---------------------------------------------------------

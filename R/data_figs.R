@@ -98,6 +98,8 @@ chin %>%
             start_date = min(deployment_time, na.rm = T),
             end_date = max(deployment_time, na.rm = T))
 
+saveRDS(chin, here::here("data", "clean_catch.RDS"))
+
 
 # STOCK COMPOSITION ------------------------------------------------------------
 
