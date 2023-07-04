@@ -1,10 +1,4 @@
-## Non-modelling Figures
-# 1) Study area including set locations as well as observations of stock 
-# aggregates
-# 2) Fork length histograms
-# 3) Box plots of size and energy density by stock
-# 4) Stock composition by size bin and month
-# 5) 
+## Map Figures
 # June 28, 2023
 
 library(tidyverse)
