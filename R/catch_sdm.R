@@ -294,13 +294,11 @@ DHARMa::testResiduals(r_nb1_size)
 
 
 ## FIXED EFFECT PREDICTIONS ----------------------------------------------------
-cvfd7
+
 # quick visualization of effect size estimates 
 fes <- tidy(f6_nb1, effects = "fixed", conf.int = T)
-  GVaZ
 fes %>% 
-  filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall", 
-                      "(Intercept)")) %>% 
+  filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall")) %>%
   ggplot(., aes(y = term, x = estimate)) +
   geom_pointrange(aes(xmin = conf.low, xmax = conf.high))
 
@@ -319,15 +317,27 @@ res %>%
 # out
 
 # fixed week effects
+# nd_week <- expand.grid(
+#   year_f = unique(catch_size$year_f), #"2020",
+#   week = seq(min(catch_size$week), max(catch_size$week), length = 30),
+#   month_f = unique(catch_size$month_f), #"7",
+#   hours_from_slack = 0,
+#   moon_illuminated = 0.5,
+#   size_bin = unique(catch_size$size_bin),
+#   mean_depth = median(catch_size$mean_depth),
+#   mean_slope = median(catch_size$mean_slope)
+# ) %>% 
+#   filter(year_f == "2020", 
+#          month_f == "7")
 nd_week <- expand.grid(
   year_f = unique(catch_size$year_f), #"2020",
-  week = seq(min(catch_size$week), max(catch_size$week), length = 30),
+  week_z = seq(-2, 2, length = 30),
   month_f = unique(catch_size$month_f), #"7",
-  hours_from_slack = 0,
-  moon_illuminated = 0.5,
+  slack_z = 0,
+  moon_z = 0,
   size_bin = unique(catch_size$size_bin),
-  mean_depth = median(catch_size$mean_depth),
-  mean_slope = median(catch_size$mean_slope)
+  depth_z = 0,
+  slope_z = 0
 ) %>% 
   filter(year_f == "2020", 
          month_f == "7")
@@ -340,60 +350,63 @@ p$variable <- "week"
 # fixed depth effects
 nd_depth <- expand.grid(
   year_f = unique(catch_size$year_f),
-  week = median(catch_size$week),
+  week_z = 0,
   month_f = unique(catch_size$month_f),
-  hours_from_slack = 0,
-  moon_illuminated = 0.5,
+  slack_z = 0,
+  moon_z = 0,
   size_bin = unique(catch_size$size_bin),
-  mean_depth = seq(min(catch_size$mean_depth), max(catch_size$mean_depth), 
-                   length = 30),
-  mean_slope = median(catch_size$mean_slope)
+  depth_z = seq(-2, 2, length = 30),
+  slope_z = 0
 ) %>% 
   filter(size_bin == "medium", year_f == "2020", month_f == "7")
 
 p_depth <- predict(f6_nb1, newdata = nd_depth, se_fit = TRUE, 
                    re_form = NA, re_form_iid = NA)
-p_depth$variable <- "mean_depth"
+p_depth$variable <- "depth"
 
 # fixed slope effects
 nd_slope <- nd_depth %>% 
   mutate(
-    mean_slope = seq(min(catch_size$mean_slope), max(catch_size$mean_slope), 
-                     length = 30),
-    mean_depth = median(catch_size$mean_depth)
+    slope_z = seq(-2, 2, length = 30),
+    depth_z = 0
   )
 p_slope <- predict(f6_nb1, newdata = nd_slope, se_fit = TRUE, 
                    re_form = NA, re_form_iid = NA)
-p_slope$variable <- "mean_slope"
+p_slope$variable <- "slope"
 
 # fixed slack effects
 nd_slack <- nd_depth %>% 
   mutate(
-    hours_from_slack = seq(min(catch_size$hours_from_slack), 
-                           max(catch_size$hours_from_slack), 
-                           length = 30),
-    mean_depth = median(catch_size$mean_depth)
+    slack_z = seq(-3, 3, length = 30),
+    depth_z = 0
   )
-
 p_slack <- predict(f6_nb1, newdata = nd_slack, se_fit = TRUE, 
                    re_form = NA, re_form_iid = NA)
-p_slack$variable <- "hours_from_slack"
+p_slack$variable <- "slack"
 
 # fixed lunar effects
 nd_moon <- nd_depth %>% 
   mutate(
-    moon_illuminated = seq(0, 1, length = 30),
-    mean_depth = median(catch_size$mean_depth)
+    moon_z = seq(-1.8, 1.22, length = 30),
+    depth_z = 0
   )
 p_moon <- predict(f6_nb1, newdata = nd_moon, se_fit = TRUE, 
                   re_form = NA, re_form_iid = NA)
-p_moon$variable <- "moon_illuminated"
+p_moon$variable <- "moon"
 
 
 full_p <- list(p, p_depth, p_slope, p_slack, p_moon) %>% 
   do.call(rbind, .) %>%
+  # p %>% 
   group_by(size_bin, variable) %>% 
   mutate(
+    week = (week_z * sd(catch_size$week)) + mean(catch_size$week),
+    depth = (depth_z * sd(catch_size$mean_depth)) + mean(catch_size$mean_depth),
+    slope = (slope_z * sd(catch_size$mean_slope)) + mean(catch_size$mean_slope),
+    slack = (slack_z * sd(catch_size$hours_from_slack)) +
+      mean(catch_size$hours_from_slack),
+    moon = (moon_z * sd(catch_size$moon_illuminated)) +
+      mean(catch_size$moon_illuminated),
     exp_est = exp(est),
     max_est = max(exp_est),
     scale_est = exp_est / max_est,
@@ -427,10 +440,10 @@ week_plot <- plot_foo(var_in = "week", x_lab = "Week") +
   facet_wrap(~size_bin) +
   theme(axis.title.y = element_text(angle = 90)) +
   ylab("Scaled Abundance")
-depth_plot <- plot_foo(var_in = "mean_depth", x_lab = "Bottom Depth")
-slope_plot <- plot_foo(var_in = "mean_slope", x_lab = "Bottom Slope")
-slack_plot <- plot_foo(var_in = "hours_from_slack", x_lab = "Hours From Slack")
-moon_plot <- plot_foo(var_in = "moon_illuminated", 
+depth_plot <- plot_foo(var_in = "depth", x_lab = "Bottom Depth (m)")
+slope_plot <- plot_foo(var_in = "slope", x_lab = "Bottom Slope (degrees)")
+slack_plot <- plot_foo(var_in = "slack", x_lab = "Hours From Slack")
+moon_plot <- plot_foo(var_in = "moon", 
                       x_lab = "Proportion Moon Illuminated")
 
 p1 <- cowplot::plot_grid(
