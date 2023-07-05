@@ -1,7 +1,6 @@
-## Fit preliminary spatial distribution models
+## Fit size-based spatial distribution models
 # August 7, 2020
 # updated Feb 22, 2023
-# Ultimately estimate stock- or size-specific spatial distribution maps
 # Given cross-validation (catch_sdm_cv.R) and goals of analysis, utilize
 # month focused spatio temporal model
 # Also include static spatial variables (e.g. depth/slope) and dynamic 
@@ -22,24 +21,12 @@ chin <- readRDS(here::here("data", "clean_catch.RDS")) %>%
 chin %>% 
   group_by(size_bin) %>% 
   tally()
-chin %>% 
-  group_by(agg) %>% 
-  tally()
-    
 
 # calculate total catch across size bins
 catch_size1 <- chin %>% 
   group_by(event, size_bin) %>% 
   summarize(catch = n(), .groups = "drop") %>% 
   ungroup()
-# catch_stock1 <- chin %>%
-#   filter(!is.na(agg),
-#          fl > 65,
-#          # remove rare stocks
-#          !agg %in% c("ECVI", "WCVI", "WA_OR", "Cali")) %>% 
-#   group_by(event, agg) %>% 
-#   summarize(catch = n(), .groups = "drop") %>% 
-#   ungroup()
 
 
 # clean and bind to set data
@@ -78,35 +65,6 @@ catch_size <- expand.grid(event = set_dat$event,
     moon_z = scale(moon_illuminated)[ , 1]
   ) 
 
-# catch_stock <- expand.grid(
-#   event = set_dat$event,
-#   agg = unique(catch_stock1$agg)
-# ) %>%
-#   arrange(event) %>%
-#   left_join(., catch_stock1, by = c("event", "agg")) %>%
-#   replace_na(., replace = list(catch = 0)) %>%
-#   left_join(., set_dat, by = "event") %>%
-#   # remove sets not on a troller and tacking
-#   filter(!grepl("rec", event),
-#          !tack == "yes") %>%
-#   mutate(
-#     # pool undersampled months
-#     month_f = case_when(
-#       month %in% c(4, 5) ~ 5,
-#       month %in% c(8, 9) ~ 8,
-#       TRUE ~ month
-#     ) %>% 
-#       as.factor(),
-#     year_f = as.factor(year),
-#     yUTM_ds = yUTM / 1000,
-#     xUTM_ds = xUTM / 1000,
-#     offset = log(set_dist),
-#     depth_z = scale(mean_depth)[ , 1],
-#     slope_z = scale(mean_slope)[ , 1],
-#     slack_z = scale(hours_from_slack)[ , 1],
-#     week_z = scale(week)[ , 1],
-#     moon_z = scale(moon_illuminated)[ , 1]
-#   ) 
  
 
 # EXP FIGS ---------------------------------------------------------------------
@@ -173,15 +131,20 @@ pred_grid <- pred_grid_list %>%
   mutate(
     xUTM_ds = X / 1000,
     yUTM_ds = Y / 1000,
-    hours_from_slack = median(catch_size$hours_from_slack),
-    moon_illuminated = 0.5,
+    slack_z = 0,
+    moon_z = 0,
     month_f = case_when(
       week <= 22 ~ "5",
       week > 22 & week <= 26 ~ "6",
       week > 26 & week <= 30 ~ "7",
       week > 30 ~ "8"
-    )) %>% 
-  rename(mean_depth = depth, mean_slope = slope)
+    ),
+    week_z = (week - mean(catch_size$week)) / sd(catch_size$week),
+    depth_z = (depth - mean(catch_size$mean_depth)) / 
+      sd(catch_size$mean_depth),
+    slope_z = (slope - mean(catch_size$mean_slope)) / 
+      sd(catch_size$mean_slope)
+    ) 
 
 
 # helper function for simple predictive maps
@@ -189,11 +152,15 @@ plot_map <- function(dat, column) {
   ggplot() +
     geom_raster(data = dat, aes(X, Y, fill = {{ column }})) +
     coord_fixed() +
-    ggsidekick::theme_sleek()
+    ggsidekick::theme_sleek() +
+    theme(
+      axis.text = element_blank(),
+      axis.title = element_blank()
+    )
 }
 
 ggplot() +
-  geom_raster(data = pred_grid, aes(X, Y, fill = mean_depth)) +
+  geom_raster(data = pred_grid, aes(X, Y, fill = depth)) +
   geom_point(data = set_dat %>%
                filter(!grepl("rec", event)), 
              aes(xUTM, yUTM, colour = as.factor(year)),
@@ -228,7 +195,7 @@ ggplot() +
 # 
 # f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 
-# f6_nb1 <- sdmTMB(
+# f6_nb1b <- sdmTMB(
 #   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
 #     depth_z + poly(moon_z, 2) +
 #     slope_z + week_z:size_bin,
@@ -238,7 +205,7 @@ ggplot() +
 #   family = sdmTMB::nbinom1(),
 #   spatial = "off",
 #   spatial_varying = ~ 0 + size_bin + month_f,
-#   anisotropy = FALSE,
+#   anisotropy = TRUE,
 #   control = sdmTMBcontrol(
 #     newton_loops = 1,
 #     map = list(
@@ -267,7 +234,7 @@ sims_nb1 %>%
 
 
 # sample from posterior using MCMC to avoid Laplace approximation
-object <- f6_nb1
+object <- f6_nb1b
 samp <- sample_mle_mcmc(object, mcmc_iter = 130, mcmc_warmup = 100)
 
 obj <- object$tmb_obj
@@ -282,12 +249,12 @@ obj_mle$tmb_map <- map
 ss <- simulate(obj_mle, mcmc_samples = extract_mcmc(samp), nsim = 30)
 
 
-pred_fixed <- f6_nb1$family$linkinv(
-  predict(f6_nb1, newdata = catch_size)$est_non_rf
+pred_fixed <- f6_nb1b$family$linkinv(
+  predict(f6_nb1b, newdata = catch_size)$est_non_rf
 )
 r_nb1_size <- DHARMa::createDHARMa(
   simulatedResponse = ss,
-  observedResponse = f6_nb1$data$catch,
+  observedResponse = f6_nb1b$data$catch,
   fittedPredictedResponse = pred_fixed
 )
 DHARMa::testResiduals(r_nb1_size)
@@ -296,21 +263,60 @@ DHARMa::testResiduals(r_nb1_size)
 ## FIXED EFFECT PREDICTIONS ----------------------------------------------------
 
 # quick visualization of effect size estimates 
-fes <- tidy(f6_nb1, effects = "fixed", conf.int = T)
-fes %>% 
-  filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall")) %>%
-  ggplot(., aes(y = term, x = estimate)) +
-  geom_pointrange(aes(xmin = conf.low, xmax = conf.high))
+fes <- tidy(f6_nb1b, effects = "fixed", conf.int = T)
+fes_trim <- fes %>% 
+  filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall"),
+         !grepl("poly", term)) %>% 
+  mutate(
+    effect = "fixed"
+  )
 
-
-# quick visualization of effect size estimates 
 res <- tidy(f6_nb1, effects = "ran_par", conf.int = T)
+res_trim <- res %>% 
+  # add unique identifier for second range term
+  group_by(term) %>% 
+  mutate(
+    par_id = row_number(),
+    term = ifelse(par_id > 1, paste(term, par_id, sep = "_"), term)
+  ) %>% 
+  ungroup() %>% 
+  filter(!term %in% c("range")) %>% 
+  dplyr::select(-par_id) %>% 
+  mutate(
+    term = fct_recode(
+      as.factor(term),
+      "large_omega" = "sigma_Z", "medium_omega" = "sigma_Z_2",
+      "small_omega" = "sigma_Z_3", "month_omega" = "sigma_Z_4",
+      "year_sigma" = "sigma_G"
+    ),
+    effect = "random"
+  ) 
 
-res %>% 
-  filter(!term %in% c("range")) %>%
-  ggplot(., aes(y = term, x = estimate)) +
-  geom_pointrange(aes(xmin = conf.low, xmax = conf.high))
+all_terms <- rbind(fes_trim, res_trim) %>%
+  mutate(
+    term2 = case_when(
+      grepl("omega", term) ~ "omega",
+      grepl("week", term) ~ "week",
+      TRUE ~ term
+    ),
+    term = fct_relevel(term, "large_omega", "medium_omega", "small_omega", 
+                       "month_omega", "year_sigma", "phi", "depth_z", "slope_z")
+  ) 
+shape_pal <- c(21, 23)
+names(shape_pal) <- unique(all_terms$effect)
 
+png(here::here("figs", "ms_figs", "par_ests.png"), res = 250, units = "in", 
+    height = 5.5, width = 5.5)
+ggplot(all_terms, aes(y = term, x = estimate, shape = effect, fill = term2)) +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high)) +
+  scale_fill_brewer(type = "qual", guide = "none") +
+  scale_shape_manual(values = shape_pal, guide = "none") +
+  ggsidekick::theme_sleek() +
+  labs(x = "Parameter Estimate") +
+  theme(
+    axis.title.y = element_blank()
+  )
+dev.off()
 
 
 # NOTE month and year values don't matter since random variables and integrated 
@@ -467,26 +473,46 @@ dev.off()
 
 ## SPATIAL PREDICTIONS ---------------------------------------------------------
 
-pp <- predict(f6_nb1, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
 
-plot_map(pp, zeta_s_size_binlarge) +
-  scale_fill_gradient2()
-plot_map(pp, zeta_s_size_binmedium) +
-  scale_fill_gradient2()
-plot_map(pp, zeta_s_size_binsmall) +
-  scale_fill_gradient2()
+pp <- predict(f6_nb1b, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
 
-plot_map(pp, zeta_s_month_f6) +
-  scale_fill_gradient2()
-plot_map(pp, zeta_s_month_f7) +
-  scale_fill_gradient2()
-plot_map(pp, zeta_s_month_f8) +
-  scale_fill_gradient2()
+week_key <- data.frame(
+  week = unique(pred_grid$week)
+) %>% 
+  mutate(
+    date = c("May 1", "June 5", "July 10", "Aug 15", "Sep 10") %>% 
+      as.factor() %>% 
+      fct_reorder(., week)
+  )
+  
 
-plot_map(pp, exp(est)) +
+size_omega <- pp %>%
+  dplyr::select(-size_bin) %>%
+  distinct() %>% 
+  pivot_longer(cols = starts_with("zeta_s_size"),
+               names_prefix = "zeta_s_size_bin",
+               names_to = "size_bin") %>% 
+  plot_map(., value) +
+  scale_fill_gradient2() +
+  facet_wrap(~size_bin)
+
+month_omega <- pp %>%
+  dplyr::select(-month_f) %>% 
+  distinct() %>% 
+  pivot_longer(cols = starts_with("zeta_s_month"),
+               names_prefix = "zeta_s_month_f",
+               names_to = "month") %>% 
+  plot_map(., value) +
+  scale_fill_gradient2() +
+  facet_wrap(~month)
+
+full_preds <- pp %>% 
+  group_by(size_bin) %>% 
+  mutate(scale_est = exp(est) / max(exp(est))) %>%
+  left_join(., week_key, by = "week") %>% 
+  plot_map(., scale_est) +
   scale_fill_viridis_c(trans = "sqrt") +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(size_bin~week)
+  facet_grid(size_bin~date)
 
 
 
