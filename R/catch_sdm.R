@@ -36,8 +36,10 @@ set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
   )
 
 
-catch_size <- expand.grid(event = set_dat$event,
-                     size_bin = unique(catch_size1$size_bin)) %>%
+catch_size <- expand.grid(
+  event = set_dat$event,
+  size_bin = unique(catch_size1$size_bin)
+) %>%
   arrange(event) %>%
   left_join(., catch_size1, by = c("event", "size_bin")) %>%
   replace_na(., replace = list(catch = 0)) %>%
@@ -57,7 +59,7 @@ catch_size <- expand.grid(event = set_dat$event,
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
-    offset = log(set_dist),
+    offset = log((set_dist / 1000) * lines),
     depth_z = scale(mean_depth)[ , 1],
     slope_z = scale(mean_slope)[ , 1],
     slack_z = scale(hours_from_slack)[ , 1],
@@ -89,6 +91,9 @@ ggplot(catch_size) +
   geom_point(aes(x = moon_illuminated, y = log(catch))) +
   facet_wrap(~size_bin)
 
+ggplot(catch_size) +
+  geom_point(aes(x = offset, y = log(catch))) +
+  facet_wrap(~size_bin)
 
 
 # BUILD MESHES -----------------------------------------------------------------
@@ -195,28 +200,52 @@ ggplot() +
 # 
 # f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 
-# f6_nb1b <- sdmTMB(
-#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
-#     depth_z + poly(moon_z, 2) +
-#     slope_z + week_z:size_bin,
-#   offset = "offset",
-#   data = catch_size,
-#   mesh = sdm_mesh1,
-#   family = sdmTMB::nbinom1(),
-#   spatial = "off",
-#   spatial_varying = ~ 0 + size_bin + month_f,
-#   anisotropy = TRUE,
-#   control = sdmTMBcontrol(
-#     newton_loops = 1,
-#     map = list(
-#       ln_tau_Z = factor(
-#         c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
-#       )
-#     )
-#   ),
-#   silent = FALSE
-# )
-# saveRDS(f6_nb1, here::here("data", "model_fits", "f6_nb1.rds"))
+f6_nb1 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+    depth_z + poly(moon_z, 2) +
+    slope_z + week_z:size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "off",
+  spatial_varying = ~ 0 + size_bin + month_f,
+  anisotropy = TRUE,
+  control = sdmTMBcontrol(
+    newton_loops = 1,
+    map = list(
+      ln_tau_Z = factor(
+        c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
+      )
+    )
+  ),
+  silent = FALSE
+)
+f7_nb1b <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+    depth_z + poly(moon_z, 2) +
+    slope_z + week_z:size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "off",
+  spatial_varying = ~ 0 + size_bin + month_f + year_f,
+  anisotropy = TRUE,
+  control = sdmTMBcontrol(
+    newton_loops = 1,
+    map = list(
+      ln_tau_Z = factor(
+        c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1),
+          rep(5, times = length(unique(catch_size$year_f)) - 1))
+      )
+    )
+  ),
+  silent = FALSE
+)
+
+saveRDS(f6_nb1, here::here("data", "model_fits", "f6_nb1.rds"))
+saveRDS(f7_nb1, here::here("data", "model_fits", "f7_nb1.rds"))
 
 f6_nb1 <- readRDS(here::here("data", "model_fits", "f6_nb1.rds"))
 
@@ -234,7 +263,7 @@ sims_nb1 %>%
 
 
 # sample from posterior using MCMC to avoid Laplace approximation
-object <- f6_nb1b
+object <- f7_nb1
 samp <- sample_mle_mcmc(object, mcmc_iter = 130, mcmc_warmup = 100)
 
 obj <- object$tmb_obj
@@ -249,12 +278,12 @@ obj_mle$tmb_map <- map
 ss <- simulate(obj_mle, mcmc_samples = extract_mcmc(samp), nsim = 30)
 
 
-pred_fixed <- f6_nb1b$family$linkinv(
-  predict(f6_nb1b, newdata = catch_size)$est_non_rf
+pred_fixed <- f7_nb1$family$linkinv(
+  predict(f7_nb1, newdata = catch_size)$est_non_rf
 )
 r_nb1_size <- DHARMa::createDHARMa(
   simulatedResponse = ss,
-  observedResponse = f6_nb1b$data$catch,
+  observedResponse = f7_nb1$data$catch,
   fittedPredictedResponse = pred_fixed
 )
 DHARMa::testResiduals(r_nb1_size)
@@ -263,7 +292,7 @@ DHARMa::testResiduals(r_nb1_size)
 ## FIXED EFFECT PREDICTIONS ----------------------------------------------------
 
 # quick visualization of effect size estimates 
-fes <- tidy(f6_nb1b, effects = "fixed", conf.int = T)
+fes <- tidy(f6_nb1, effects = "fixed", conf.int = T)
 fes_trim <- fes %>% 
   filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall"),
          !grepl("poly", term)) %>% 
@@ -461,7 +490,7 @@ dev.off()
 ## SPATIAL PREDICTIONS ---------------------------------------------------------
 
 
-pp <- predict(f6_nb1b, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+pp <- predict(f7_nb1, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
 
 week_key <- data.frame(
   week = unique(pred_grid$week)
@@ -493,6 +522,17 @@ month_omega <- pp %>%
   plot_map(., value) +
   scale_fill_gradient2(name = "Spatial\nRF Effect") +
   facet_wrap(~month) +
+  theme(legend.position = "top")
+
+month_omega <- pp %>%
+  dplyr::select(-year_f) %>% 
+  distinct() %>% 
+  pivot_longer(cols = starts_with("zeta_s_year"),
+               names_prefix = "zeta_s_year_f",
+               names_to = "year") %>% 
+  plot_map(., value) +
+  scale_fill_gradient2(name = "Spatial\nRF Effect") +
+  facet_wrap(~year) +
   theme(legend.position = "top")
 
 full_preds <- pp %>% 
