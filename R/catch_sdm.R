@@ -322,23 +322,10 @@ dev.off()
 # NOTE month and year values don't matter since random variables and integrated 
 # out
 
-# fixed week effects
-# nd_week <- expand.grid(
-#   year_f = unique(catch_size$year_f), #"2020",
-#   week = seq(min(catch_size$week), max(catch_size$week), length = 30),
-#   month_f = unique(catch_size$month_f), #"7",
-#   hours_from_slack = 0,
-#   moon_illuminated = 0.5,
-#   size_bin = unique(catch_size$size_bin),
-#   mean_depth = median(catch_size$mean_depth),
-#   mean_slope = median(catch_size$mean_slope)
-# ) %>% 
-#   filter(year_f == "2020", 
-#          month_f == "7")
 nd_week <- expand.grid(
-  year_f = unique(catch_size$year_f), #"2020",
+  year_f = unique(catch_size$year_f), 
   week_z = seq(-2, 2, length = 30),
-  month_f = unique(catch_size$month_f), #"7",
+  month_f = unique(catch_size$month_f), 
   slack_z = 0,
   moon_z = 0,
   size_bin = unique(catch_size$size_bin),
@@ -493,8 +480,9 @@ size_omega <- pp %>%
                names_prefix = "zeta_s_size_bin",
                names_to = "size_bin") %>% 
   plot_map(., value) +
-  scale_fill_gradient2() +
-  facet_wrap(~size_bin)
+  scale_fill_gradient2(name = "Spatial\nRF Effect") +
+  facet_wrap(~size_bin) +
+  theme(legend.position = "top")
 
 month_omega <- pp %>%
   dplyr::select(-month_f) %>% 
@@ -503,105 +491,31 @@ month_omega <- pp %>%
                names_prefix = "zeta_s_month_f",
                names_to = "month") %>% 
   plot_map(., value) +
-  scale_fill_gradient2() +
-  facet_wrap(~month)
+  scale_fill_gradient2(name = "Spatial\nRF Effect") +
+  facet_wrap(~month) +
+  theme(legend.position = "top")
 
 full_preds <- pp %>% 
   group_by(size_bin) %>% 
   mutate(scale_est = exp(est) / max(exp(est))) %>%
   left_join(., week_key, by = "week") %>% 
   plot_map(., scale_est) +
-  scale_fill_viridis_c(trans = "sqrt") +
-  facet_grid(size_bin~date)
+  scale_fill_viridis_c(trans = "sqrt", name = "Scaled\nAbundance") +
+  facet_grid(date~size_bin)
 
 
-
-# PREDICTION GRID --------------------------------------------------------------
-
-# import 1.8 X 1.8 km grid generated in prep_bathymetry.R in chinTagging repo
-pred_bathy_grid <- readRDS(
-  here::here("data", "pred_bathy_grid_utm.RDS"))
-
-# generate combinations for month/year
-pred_dat <- expand.grid(
-  week = seq(min(catch_size$week), max(catch_size$week), length = 5),
-  year_f = unique(catch_size$year_f),
-  size_bin = unique(catch_size$size_bin)
-) %>% 
-  filter(year_f == "2021") 
-
-pred_grid_list <- vector(mode = "list", length = nrow(pred_dat))
-for (i in seq_along(pred_grid_list)) {
-  pred_grid_list[[i]] <- pred_bathy_grid %>% 
-    filter(X < max(catch_size$xUTM + 1000) & X > min(catch_size$xUTM - 1000),
-           Y < max(catch_size$yUTM + 1000) & Y > min(catch_size$yUTM - 1000)) %>% 
-    mutate(week = pred_dat$week[i],
-           year_f = pred_dat$year_f[i],
-           size_bin = pred_dat$size_bin[i])
-}
-
-pred_grid <- pred_grid_list %>% 
-  bind_rows() %>% 
-  mutate(
-    xUTM_ds = X / 1000,
-    yUTM_ds = Y / 1000#,
-    # coast_dist_km = shore_dist / 1000,
-    # hours_from_slack = median(catch$hours_from_slack),
-    # moon_illuminated = 0.5,
-    # year_f = as.factor(year)
-  ) %>% 
-  rename(mean_depth = depth, mean_slope = slope)#%>% 
-  # dplyr::select(
-  #   X, Y, xUTM_ds, yUTM_ds, month, year, year_f, year_day, hours_from_slack, 
-  #   moon_illuminated, mean_depth = depth, mean_slope = slope
-  # )
-
-
-## SPATIAL PREDICTIONS ---------------------------------------------------------
-
-catch_tbl$sim_preds <- purrr::map(
-  catch_tbl$st_fits,
-  ~ predict(.x, newdata = pred_grid, nsim = 20, type = "response")
-)
-catch_tbl$preds <- purrr::map(
-  catch_tbl$st_fits,
-  ~ predict(.x, newdata = pred_grid)
-)
-
-catch_preds <- catch_tbl %>% 
-  dplyr::select(size_bin, preds) %>% 
-  unnest(cols = c(preds))
-
-
-
-#Predictions incorporating all fixed and random effects
-# Generally the impacts of different meshes considered here were negligible
-month_preds <- plot_map(pp, exp(est)) +
-  scale_fill_viridis_c(trans = "sqrt") +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(size_bin~week) 
-year_preds <- plot_map(catch_preds %>% filter(month == "7"), exp(est)) +
-  scale_fill_viridis_c(trans = "sqrt") +
-  ggtitle("Prediction (fixed effects + all random effects)") +
-  facet_grid(size_bin~year) #+
-
-
-# Spatial random effects (i.e. independent of time)
-omega <- plot_map(catch_preds, omega_s) +
-  scale_fill_gradient2() +
-  ggtitle("Spatial Random Effects") +
-  facet_wrap(~size_bin) #+
-
-# Spatiotemporal random effects
-eps <- plot_map(catch_preds, epsilon_st) +
-  scale_fill_gradient2() +
-  ggtitle("Spatiotemporal Random Effects") +
-  facet_grid(size_bin~month) 
-
-
-pdf(here::here("figs", "spatial_preds_sizebins.pdf"))
-month_preds
-year_preds
-omega
-eps
+png(here::here("figs", "ms_figs", "month_omega.png"), res = 250, units = "in", 
+    height = 7.5, width = 7.5)
+month_omega
 dev.off()
+
+png(here::here("figs", "ms_figs", "size_omega.png"), res = 250, units = "in", 
+    height = 7.5, width = 7.5)
+size_omega
+dev.off()
+
+png(here::here("figs", "ms_figs", "spatial_preds.png"), res = 250, units = "in", 
+    height = 7.5, width = 7.5)
+full_preds
+dev.off()
+
