@@ -29,3 +29,4 @@ myNotes.*
 scripts/*cache*
 *.o
 *.so
+data/model_fits/

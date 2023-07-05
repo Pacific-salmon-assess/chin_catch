@@ -32,14 +32,14 @@ catch_size1 <- chin %>%
   group_by(event, size_bin) %>% 
   summarize(catch = n(), .groups = "drop") %>% 
   ungroup()
-catch_stock1 <- chin %>%
-  filter(!is.na(agg),
-         fl > 65,
-         # remove rare stocks
-         !agg %in% c("ECVI", "WCVI", "WA_OR", "Cali")) %>% 
-  group_by(event, agg) %>% 
-  summarize(catch = n(), .groups = "drop") %>% 
-  ungroup()
+# catch_stock1 <- chin %>%
+#   filter(!is.na(agg),
+#          fl > 65,
+#          # remove rare stocks
+#          !agg %in% c("ECVI", "WCVI", "WA_OR", "Cali")) %>% 
+#   group_by(event, agg) %>% 
+#   summarize(catch = n(), .groups = "drop") %>% 
+#   ungroup()
 
 
 # clean and bind to set data
@@ -78,35 +78,35 @@ catch_size <- expand.grid(event = set_dat$event,
     moon_z = scale(moon_illuminated)[ , 1]
   ) 
 
-catch_stock <- expand.grid(
-  event = set_dat$event,
-  agg = unique(catch_stock1$agg)
-) %>%
-  arrange(event) %>%
-  left_join(., catch_stock1, by = c("event", "agg")) %>%
-  replace_na(., replace = list(catch = 0)) %>%
-  left_join(., set_dat, by = "event") %>%
-  # remove sets not on a troller and tacking
-  filter(!grepl("rec", event),
-         !tack == "yes") %>%
-  mutate(
-    # pool undersampled months
-    month_f = case_when(
-      month %in% c(4, 5) ~ 5,
-      month %in% c(8, 9) ~ 8,
-      TRUE ~ month
-    ) %>% 
-      as.factor(),
-    year_f = as.factor(year),
-    yUTM_ds = yUTM / 1000,
-    xUTM_ds = xUTM / 1000,
-    offset = log(set_dist),
-    depth_z = scale(mean_depth)[ , 1],
-    slope_z = scale(mean_slope)[ , 1],
-    slack_z = scale(hours_from_slack)[ , 1],
-    week_z = scale(week)[ , 1],
-    moon_z = scale(moon_illuminated)[ , 1]
-  ) 
+# catch_stock <- expand.grid(
+#   event = set_dat$event,
+#   agg = unique(catch_stock1$agg)
+# ) %>%
+#   arrange(event) %>%
+#   left_join(., catch_stock1, by = c("event", "agg")) %>%
+#   replace_na(., replace = list(catch = 0)) %>%
+#   left_join(., set_dat, by = "event") %>%
+#   # remove sets not on a troller and tacking
+#   filter(!grepl("rec", event),
+#          !tack == "yes") %>%
+#   mutate(
+#     # pool undersampled months
+#     month_f = case_when(
+#       month %in% c(4, 5) ~ 5,
+#       month %in% c(8, 9) ~ 8,
+#       TRUE ~ month
+#     ) %>% 
+#       as.factor(),
+#     year_f = as.factor(year),
+#     yUTM_ds = yUTM / 1000,
+#     xUTM_ds = xUTM / 1000,
+#     offset = log(set_dist),
+#     depth_z = scale(mean_depth)[ , 1],
+#     slope_z = scale(mean_slope)[ , 1],
+#     slack_z = scale(hours_from_slack)[ , 1],
+#     week_z = scale(week)[ , 1],
+#     moon_z = scale(moon_illuminated)[ , 1]
+#   ) 
  
 
 # EXP FIGS ---------------------------------------------------------------------
@@ -135,14 +135,13 @@ ggplot(catch_size) +
 
 # BUILD MESHES -----------------------------------------------------------------
 
-# construct a few alternative meshes ( can be applied to all size bins so only 
-# one needed)
+# construct a few alternative meshes
 sdm_mesh1 <- make_mesh(catch_size,
                       c("xUTM_ds", "yUTM_ds"),
                       n_knots = 250)
-sdm_mesh2 <- make_mesh(catch_size,
-                       c("xUTM_ds", "yUTM_ds"),
-                       n_knots = 150)
+# sdm_mesh2 <- make_mesh(catch_size,
+#                        c("xUTM_ds", "yUTM_ds"),
+#                        n_knots = 150)
 
 
 # SPATIAL PREDICTION GRID ------------------------------------------------------
@@ -205,34 +204,34 @@ ggplot() +
 
 # SPATIAL MODELS ---------------------------------------------------------------
 
-f6 <- sdmTMB(
-  catch ~ (1 | year_f) + size_bin + poly(hours_from_slack, 2) +
-    mean_depth + poly(moon_illuminated, 2) +
-    mean_slope + week:size_bin,
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom2(),
-  spatial = "off",
-  spatial_varying = ~ 0 + size_bin + month_f,
-  anisotropy = FALSE,
-  control = sdmTMBcontrol(
-    newton_loops = 1,
-    map = list(
-      ln_tau_Z = factor(
-        c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
-      )
-    )
-  ),
-  silent = FALSE
-)
-
-f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
+# f6 <- sdmTMB(
+#   catch ~ (1 | year_f) + size_bin + poly(hours_from_slack, 2) +
+#     mean_depth + poly(moon_illuminated, 2) +
+#     mean_slope + week:size_bin,
+#   offset = "offset",
+#   data = catch_size,
+#   mesh = sdm_mesh1,
+#   family = sdmTMB::nbinom2(),
+#   spatial = "off",
+#   spatial_varying = ~ 0 + size_bin + month_f,
+#   anisotropy = FALSE,
+#   control = sdmTMBcontrol(
+#     newton_loops = 1,
+#     map = list(
+#       ln_tau_Z = factor(
+#         c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
+#       )
+#     )
+#   ),
+#   silent = FALSE
+# )
+# 
+# f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 
 # f6_nb1 <- sdmTMB(
-#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) + 
-#     poly(depth_z, 2) + poly(moon_z, 2) +
-#     slope_z + week_z:size_bin, 
+#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+#     depth_z + poly(moon_z, 2) +
+#     slope_z + week_z:size_bin,
 #   offset = "offset",
 #   data = catch_size,
 #   mesh = sdm_mesh1,
@@ -250,6 +249,10 @@ f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 #   ),
 #   silent = FALSE
 # )
+# saveRDS(f6_nb1, here::here("data", "model_fits", "f6_nb1.rds"))
+
+f6_nb1 <- readRDS(here::here("data", "model_fits", "f6_nb1.rds"))
+
 
 ## SIMULATION CHECKS -----------------------------------------------------------
 
@@ -258,7 +261,7 @@ f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
 # sims_nb2 %>% 
 #   dharma_residuals(f6)
 
-sims_nb1 <- simulate(f6_nb1, nsim = 100)
+sims_nb1 <- simulate(f6_nb1, nsim = 100, newdata = catch_size)
 sims_nb1 %>% 
   dharma_residuals(f6_nb1)
 
@@ -291,10 +294,10 @@ DHARMa::testResiduals(r_nb1_size)
 
 
 ## FIXED EFFECT PREDICTIONS ----------------------------------------------------
-
+cvfd7
 # quick visualization of effect size estimates 
 fes <- tidy(f6_nb1, effects = "fixed", conf.int = T)
-
+  GVaZ
 fes %>% 
   filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall", 
                       "(Intercept)")) %>% 
