@@ -64,7 +64,8 @@ catch_size <- expand.grid(
     slope_z = scale(mean_slope)[ , 1],
     slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1],
-    moon_z = scale(moon_illuminated)[ , 1]
+    moon_z = scale(moon_illuminated)[ , 1],
+    dist_z = scale(coast_dist_km)
   ) 
 
  
@@ -176,30 +177,6 @@ ggplot() +
 
 # SPATIAL MODELS ---------------------------------------------------------------
 
-# f6 <- sdmTMB(
-#   catch ~ (1 | year_f) + size_bin + poly(hours_from_slack, 2) +
-#     mean_depth + poly(moon_illuminated, 2) +
-#     mean_slope + week:size_bin,
-#   offset = "offset",
-#   data = catch_size,
-#   mesh = sdm_mesh1,
-#   family = sdmTMB::nbinom2(),
-#   spatial = "off",
-#   spatial_varying = ~ 0 + size_bin + month_f,
-#   anisotropy = FALSE,
-#   control = sdmTMBcontrol(
-#     newton_loops = 1,
-#     map = list(
-#       ln_tau_Z = factor(
-#         c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
-#       )
-#     )
-#   ),
-#   silent = FALSE
-# )
-# 
-# f6_nb1 <- update(f6, family = sdmTMB::nbinom1())
-
 f6_nb1 <- sdmTMB(
   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
@@ -221,6 +198,31 @@ f6_nb1 <- sdmTMB(
   ),
   silent = FALSE
 )
+
+f8_nb1 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+    depth_z + poly(moon_z, 2) +
+    slope_z + week_z:size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "off",
+  time = "month",
+  spatial_varying = ~ 0 + size_bin,
+  spatiotemporal = "ar1",
+  anisotropy = TRUE,
+  control = sdmTMBcontrol(
+    newton_loops = 1,
+    map = list(
+      ln_tau_Z = factor(
+        c(1, 2, 3)
+      )
+    )
+  ),
+  silent = FALSE
+)
+
 f7_nb1b <- sdmTMB(
   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
