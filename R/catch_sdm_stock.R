@@ -51,12 +51,12 @@ catch_stock <- expand.grid(
          !tack == "yes") %>%
   mutate(
     # pool undersampled months
-    month_f = case_when(
+    month = case_when(
       month %in% c(4, 5) ~ 5,
       month %in% c(8, 9) ~ 8,
       TRUE ~ month
-    ) %>%
-      as.factor(),
+    ),
+    month_f = as.factor(month),
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
@@ -66,7 +66,184 @@ catch_stock <- expand.grid(
     slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1],
     moon_z = scale(moon_illuminated)[ , 1]
-  )
+  ) %>% 
+  droplevels()
+
+
+## FIT PRELIM MODELS -----------------------------------------------------------
+
+fr_sub <- catch_stock %>% filter(agg == "Fraser Sub.")
+
+sdm_mesh1 <- make_mesh(fr_sub,
+                       c("xUTM_ds", "yUTM_ds"),
+                       n_knots = 250)
+
+f3 <- sdmTMB(
+  catch ~ week_z + (1 | year_f),
+  offset = "offset",
+  data = fr_sub,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  anisotropy = FALSE,
+  priors = sdmTMBpriors(
+    phi = halfnormal(0, 5),
+    b = normal(
+      #mean
+      c(-2.5, 0.25),
+      #sd
+      c(2, 1)
+    ),
+    matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
+  ),
+  silent = FALSE
+)
+f3b <- sdmTMB(
+  catch ~ week_z + depth_z + slope_z + (1 | year_f),
+  offset = "offset",
+  data = fr_sub,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  anisotropy = FALSE,
+  priors = sdmTMBpriors(
+    phi = halfnormal(0, 5),
+    b = normal(
+      #mean
+      c(-2.5, 0.25, -0.25, 0.25),
+      #sd
+      c(2, 1, 1, 1)
+    ),
+    matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
+  ),
+  silent = FALSE
+)
+
+# fails to converge
+# f4 <- sdmTMB(
+#   catch ~ week_z + (1 | year_f),
+#   offset = "offset",
+#   data = fr_sub,
+#   mesh = sdm_mesh1,
+#   family = sdmTMB::nbinom1(),
+#   spatial = "off",
+#   spatial_varying = ~ 0 + month_f,
+#   anisotropy = FALSE,
+#   priors = sdmTMBpriors(
+#     b = normal(
+#       #mean
+#       c(-2.5, 0.25),
+#       #sd
+#       c(2, 1)
+#     ),
+#     matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
+#   ),
+#   control = sdmTMBcontrol(
+#     newton_loops = 1,
+#     start = list(
+#       ln_phi = log(0.16) #approximate value estimated in catch_sdm
+#     ),
+#     map = list(
+#       ln_phi = factor(NA),
+#       ln_tau_Z = factor(
+#         seq(1, length(unique(catch_stock$month_f)), by = 1)
+#       )
+#     )
+#   ),
+#   silent = FALSE
+# )
+
+f5 <- sdmTMB(
+  catch ~ week_z + (1 | year_f),
+  offset = "offset",
+  data = fr_sub,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  time = "month",
+  spatiotemporal = "iid",
+  anisotropy = FALSE,
+  priors = sdmTMBpriors(
+    b = normal(
+      #mean
+      c(-2.5, 0.25),
+      #sd
+      c(2, 1)
+    ),
+    matern_s = pc_matern(range_gt = 40, sigma_lt = 10),
+    matern_st = pc_matern(range_gt = 40, sigma_lt = 10)
+  ),
+  control = sdmTMBcontrol(
+    newton_loops = 1,
+    start = list(
+      ln_phi = log(0.16) #approximate value estimated in catch_sdm
+    ),
+    map = list(
+      ln_phi = factor(NA)
+      )
+  ),
+  silent = FALSE
+)
+# fails to converge
+# f5b <- sdmTMB(
+#   catch ~ week_z + depth_z + slope_z + (1 | year_f),
+#   offset = "offset",
+#   data = fr_sub,
+#   mesh = sdm_mesh1,
+#   family = sdmTMB::nbinom1(),
+#   spatial = "on",
+#   time = "month",
+#   spatiotemporal = "iid",
+#   anisotropy = FALSE,
+#   priors = sdmTMBpriors(
+#     b = normal(
+#       #mean
+#       c(-2.5, 0.25, -0.25, 0.25),
+#       #sd
+#       c(2, 1, 1, 1)
+#     ),
+#     matern_s = pc_matern(range_gt = 40, sigma_lt = 10),
+#     matern_st = pc_matern(range_gt = 40, sigma_lt = 10)
+#   ),
+#   control = sdmTMBcontrol(
+#     newton_loops = 1,
+#     start = list(
+#       ln_phi = log(0.16) #approximate value estimated in catch_sdm
+#     ),
+#     map = list(
+#       ln_phi = factor(NA)
+#     )
+#   ),
+#   silent = FALSE
+# )
+
+
+# check most complicated model
+mod_in <- f5
+samp <- sample_mle_mcmc(mod_in, mcmc_iter = 130, mcmc_warmup = 100)
+
+obj <- mod_in$tmb_obj
+random <- unique(names(obj$env$par[obj$env$random]))
+pl <- as.list(mod_in$sd_report, "Estimate")
+fixed <- !(names(pl) %in% random)
+map <- lapply(pl[fixed], function(x) factor(rep(NA, length(x))))
+obj <- TMB::MakeADFun(obj$env$data, pl, map = map, DLL = "sdmTMB")
+obj_mle <- mod_in
+obj_mle$tmb_obj <- obj
+obj_mle$tmb_map <- map
+ss <- simulate(obj_mle, mcmc_samples = extract_mcmc(samp), nsim = 30)
+
+
+pred_fixed <- mod_in$family$linkinv(
+  predict(mod_in, newdata = fr_sub)$est_non_rf
+)
+dharma_res_out <- DHARMa::createDHARMa(
+  simulatedResponse = ss,
+  observedResponse = mod_in$data$catch,
+  fittedPredictedResponse = pred_fixed
+)
+DHARMa::testResiduals(dharma_res_out)
+
 
 
 # SPATIAL PREDICTION GRID ------------------------------------------------------
@@ -98,12 +275,13 @@ pred_grid <- pred_grid_list %>%
     yUTM_ds = Y / 1000,
     slack_z = 0,
     moon_z = 0,
-    month_f = case_when(
-      week <= 22 ~ "5",
-      week > 22 & week <= 26 ~ "6",
-      week > 26 & week <= 30 ~ "7",
-      week > 30 ~ "8"
+    month = case_when(
+      week <= 22 ~ 5,
+      week > 22 & week <= 26 ~ 6,
+      week > 26 & week <= 30 ~ 7,
+      week > 30 ~ 8
     ),
+    month_f = as.factor(month),
     week_z = (week - mean(catch_stock$week)) / sd(catch_stock$week),
     depth_z = (depth - mean(catch_stock$mean_depth)) / 
       sd(catch_stock$mean_depth),
@@ -125,121 +303,60 @@ plot_map <- function(dat, column) {
 }
 
 
-## IMPACT OF PRIORS ------------------------------------------------------------
+## SPATIAL PREDICTIONS ---------------------------------------------------------
 
-fr_sub <- catch_stock %>% filter(agg == "Fraser Sub.")
+p3 <- predict(f3, newdata = pred_grid, se_fit = FALSE, re_form = NULL) %>% 
+  mutate(model = "f3",
+         epsilon_st = NA)
+p5 <- predict(f5, newdata = pred_grid, se_fit = FALSE, re_form = NULL) %>% 
+  mutate(model = "f5")
+pp <- rbind(p3, p5) %>% 
+  mutate(exp_est = exp(est))
 
-sdm_mesh1 <- make_mesh(fr_sub,
-                       c("xUTM_ds", "yUTM_ds"),
-                       n_knots = 250)
 
-f1 <-  sdmTMB(
-  catch ~ week_z,
-  offset = "offset",
-  data = fr_sub,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  anisotropy = FALSE,
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 5),
-    matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
-  ),
-  silent = FALSE
-)
+plot_map(pp, omega_s) +
+  scale_fill_gradient2(name = "Spatial\nRF Effect") +
+  facet_wrap(~model)
 
-f2 <- sdmTMB(
-  catch ~ week_z,
-  offset = "offset",
-  data = fr_sub,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  anisotropy = FALSE,
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 5),
-    b = normal(
-      #mean
-      c(-2.5, 0.25),
-      #sd
-      c(2, 1)
-    ),
-    matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
-  ),
-  silent = FALSE
-)
+plot_map(p5, epsilon_st) +
+  scale_fill_gradient2(name = "Spatiotemporal\nRF Effect") +
+  facet_wrap(~month)
 
-f3 <- sdmTMB(
-  catch ~ week_z + (1 | year_f),
-  offset = "offset",
-  data = fr_sub,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  anisotropy = FALSE,
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 5),
-    b = normal(
-      #mean
-      c(-2.5, 0.25),
-      #sd
-      c(2, 1)
-    ),
-    matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
-  ),
-  silent = FALSE
-)
+plot_map(pp, exp_est) +
+  facet_grid(model~month) +
+  scale_fill_viridis_c()
 
-f4 <- sdmTMB(
-  catch ~ week_z + (1 | year_f),
-  offset = "offset",
-  data = fr_sub,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "off",
-  spatial_varying = ~ 0 + month_f,
-  anisotropy = FALSE,
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 5),
-    b = normal(
-      #mean
-      c(-2.5, 0.25),
-      #sd
-      c(2, 1)
-    ),
-    matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
-  ),
-  control = sdmTMBcontrol(
-    newton_loops = 1,
-    map = list(
-      ln_tau_Z = factor(
-        rep(1, times = length(unique(catch_stock$month_f)))
-      )
-    )
-  ),
-  silent = FALSE
-)
+month_omega <- pp %>%
+  dplyr::select(-year_f) %>% 
+  distinct() %>% 
+  pivot_longer(cols = starts_with("zeta_s_year"),
+               names_prefix = "zeta_s_year_f",
+               names_to = "year") %>% 
+  plot_map(., value) +
+  scale_fill_gradient2(name = "Spatial\nRF Effect") +
+  facet_wrap(~year) +
+  theme(legend.position = "top")
 
-f5 <- sdmTMB(
-  catch ~ week_z + (1 | year_f),
-  offset = "offset",
-  data = fr_sub,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  time = "month",
-  spatiotemporal = "iid",
-  anisotropy = FALSE,
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 5),
-    b = normal(
-      #mean
-      c(-2.5, 0.25),
-      #sd
-      c(2, 1)
-    ),
-    matern_s = pc_matern(range_gt = 40, sigma_lt = 10),
-    matern_st = pc_matern(range_gt = 40, sigma_lt = 10)
-  ),
-  silent = FALSE
-)
+full_preds <- pp %>% 
+  group_by(size_bin) %>% 
+  mutate(scale_est = exp(est) / max(exp(est))) %>%
+  left_join(., week_key, by = "week") %>% 
+  plot_map(., scale_est) +
+  scale_fill_viridis_c(trans = "sqrt", name = "Scaled\nAbundance") +
+  facet_grid(date~size_bin)
+
+
+png(here::here("figs", "ms_figs", "month_omega.png"), res = 250, units = "in", 
+    height = 7.5, width = 7.5)
+month_omega
+dev.off()
+
+png(here::here("figs", "ms_figs", "size_omega.png"), res = 250, units = "in", 
+    height = 7.5, width = 7.5)
+size_omega
+dev.off()
+
+png(here::here("figs", "ms_figs", "spatial_preds.png"), res = 250, units = "in", 
+    height = 7.5, width = 7.5)
+full_preds
+dev.off()
