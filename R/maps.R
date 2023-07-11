@@ -18,6 +18,12 @@ sets <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
 chin <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>% 
   mutate(
     month = lubridate::month(deployment_time),
+    month = case_when(
+      month %in% c(4, 5) ~ 5,
+      month %in% c(8, 9) ~ 8,
+      TRUE ~ month
+    ),
+    month_f = as.factor(month),
     size_class = case_when(
       fl < 65 ~ "small",
       fl >= 65 & fl < 75 ~ "medium",
@@ -63,7 +69,7 @@ stock_catch <- ggplot() +
   theme(axis.title = element_blank(),
         legend.title = element_blank(),
         axis.text = element_blank()) +
-  facet_wrap(~agg_name)
+  facet_grid(agg_name~month)
 
 
 png(here::here("figs", "ms_figs", "set_map.png"), res = 250, units = "in", 
