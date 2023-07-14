@@ -68,13 +68,12 @@ chin_catch <- readRDS(here::here("data", "clean_catch.RDS")) %>%
     mu = case_when(
       agg_name %in% c("WCVI", "ECVI") ~ agg_name,
       cu == "LFR-fall" ~ "Fraser\nFall",
-      cu == "LTh" ~ "Fraser\nSpr. 5.2",
+      cu == "LTh" ~ "Fraser\nSpr. 4.2",
+      cu %in% c("MFR-spring", "UFR-spring") ~ "Fraser\nSpr. 5.2",
       cu %in% c("MFR-summer", "NTh-sum", "STh-1.3") ~ "Fraser\nSum. 5.2",
       cu %in% c("STh-0.3", "STh-SHUR") ~ "Fraser\nSum. 0.3",
       TRUE ~ cu
-    ),
-    mu2 = ifelse(mu %in% c("Fraser\nSpr. 5.2", "Fraser\nSum. 5.2"), mu, "other")
-  )
+    ))
 
 calc_ppn <- function(dat) {
  dat %>%

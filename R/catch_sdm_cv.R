@@ -156,3 +156,6 @@ cv_9 <- sdmTMB_cv(
   use_initial_fit = TRUE,
   k_folds = 5
 )
+
+cv_list <- list(cv_6, cv_8, cv_9)
+saveRDS(cv_list, here::here("data", "model_fits", "cv_list.rds"))
