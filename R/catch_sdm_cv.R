@@ -159,3 +159,15 @@ cv_9 <- sdmTMB_cv(
 
 cv_list <- list(cv_6, cv_8, cv_9)
 saveRDS(cv_list, here::here("data", "model_fits", "cv_list.rds"))
+
+cv_list <- readRDS(here::here("data", "model_fits", "cv_list.rds"))
+
+purrr::map(
+  cv_list,
+  ~ .x$elpd
+)
+
+purrr::map(
+  cv_list,
+  ~ .x$sum_loglik
+)
