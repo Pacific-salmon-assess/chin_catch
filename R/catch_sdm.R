@@ -17,16 +17,29 @@ library(sdmTMBextra)
 chin <- readRDS(here::here("data", "clean_catch.RDS")) %>% 
   rename(agg = agg_name)
 
-
 chin %>% 
   group_by(size_bin) %>% 
   tally()
+
+
+# import bycatch data representing sublegal catch
+chin_juv <- read.csv(
+  here::here("data", "bycatchData.csv"),
+  stringsAsFactors = F) %>% 
+  filter(species == "chinook",
+         !grepl("2023", event)) %>% 
+  mutate(size_bin = "sublegal") %>% 
+  dplyr::select(
+    event, size_bin, catch = count
+  )
+
 
 # calculate total catch across size bins
 catch_size1 <- chin %>% 
   group_by(event, size_bin) %>% 
   summarize(catch = n(), .groups = "drop") %>% 
-  ungroup()
+  ungroup() %>% 
+  rbind(., chin_juv)
 
 
 # clean and bind to set data
@@ -196,7 +209,10 @@ fit <- sdmTMB(
   silent = FALSE
 )
 
-saveRDS(fit, here::here("data", "model_fits", "fit_mvrfrw.rds"))
+saveRDS(fit, here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
+
+fit <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
+
 
 # 
 # f8_nb1 <- sdmTMB(
@@ -296,7 +312,8 @@ DHARMa::testResiduals(r_nb1_size)
 # quick visualization of effect size estimates 
 fes <- tidy(fit, effects = "fixed", conf.int = T)
 fes_trim <- fes %>% 
-  filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall"),
+  filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall",
+                      "size_binsublegal"),
          !grepl("poly", term)) %>% 
   mutate(
     effect = "fixed"
@@ -483,15 +500,17 @@ p1 <- cowplot::plot_grid(
 )
 
 png(here::here("figs", "ms_figs", "week_fe.png"), res = 250, units = "in", 
-    height = 2.75, width = 5.5)
+    height = 5.5, width = 5.5)
 week_plot
 dev.off()
 
 png(here::here("figs", "ms_figs", "other_fes.png"), res = 250, units = "in", 
     height = 5.5, width = 5.5)
 gridExtra::grid.arrange(
-  gridExtra::arrangeGrob(p1, 
-                         left = grid::textGrob("Scaled Abundance", rot = 90)))
+  gridExtra::arrangeGrob(
+    p1, 
+    left = grid::textGrob("Scaled Abundance", rot = 90))
+  )
 dev.off()
 
 
