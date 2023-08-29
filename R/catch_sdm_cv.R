@@ -72,13 +72,91 @@ catch_size <- expand.grid(
     dist_z = scale(coast_dist_km)
   ) 
 
+sdm_mesh1 <- make_mesh(catch_size,
+                       c("xUTM_ds", "yUTM_ds"),
+                       n_knots = 180)
+
+# original fit
+test_fit <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin + week_z:size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "off",
+  spatial_varying = ~ 0 + size_bin + month_f,
+  anisotropy = TRUE,
+  control = sdmTMBcontrol(
+    newton_loops = 1,
+    map = list(
+      ln_tau_Z = factor(
+        c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
+      )
+    )
+  ),
+  silent = FALSE
+)
+
+est <- as.list(test_fit$sd_report, "Estimate", report = TRUE)
+se <- as.list(test_fit$sd_report, "Std. Error", report = TRUE)
+log_est = est$log_sigma_Z
+log_se = se$log_sigma_U
+
+# mvrfrw no time in mu (common spatial variability value since size-specific 
+# wouldn't converge)
+test_fit2 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  # spatial_varying = ~ 0 + size_bin,
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "size_bin",
+  anisotropy = FALSE,
+  silent = FALSE
+)
+
+# mvrfrw linear time
+test_fit3 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin + week_z:size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  # spatial_varying = ~ 0 + size_bin,
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "size_bin",
+  anisotropy = FALSE,
+  silent = FALSE
+)
+
+# mvrfrw smooth time (fails to converge)
+test_fit4 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin + s(week_z, k = 3),
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  # spatial_varying = ~ 0 + size_bin,
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "size_bin",
+  anisotropy = FALSE,
+  silent = FALSE
+)
 
 
 ## TOTAL CATCH SPATIOTEMPORAL MODELS -------------------------------------------
 
 # prep multisession
 ncores <- parallel::detectCores() 
-future::plan(future::multisession, workers = ncores - 3)
+future::plan(future::multisession, workers = 50L)
 
 
 # test model
