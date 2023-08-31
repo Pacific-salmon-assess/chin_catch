@@ -83,7 +83,9 @@ catch_size <- expand.grid(
     week_z = scale(week)[ , 1],
     moon_z = scale(moon_illuminated)[ , 1],
     dist_z = scale(coast_dist_km)[ , 1]
-  ) 
+  ) #%>% 
+  # filter(!size_bin == "sublegal")
+# confirmed similar results after removing sublegal fish
 
 
 sdm_mesh1 <- make_mesh(catch_size,
@@ -103,6 +105,42 @@ cv_month <- sdmTMB_cv(
   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
     slope_z + week_z:size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "size_bin",
+  anisotropy = FALSE,
+  silent = FALSE,
+  use_initial_fit = TRUE,
+  k_folds = 5
+)
+
+cv_month2 <- sdmTMB_cv(
+  catch ~ 0 + year_f + size_bin + poly(slack_z, 2) +
+    depth_z + poly(moon_z, 2) +
+    slope_z + week_z:size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "size_bin",
+  anisotropy = FALSE,
+  silent = FALSE,
+  use_initial_fit = TRUE,
+  k_folds = 5
+)
+
+cv_month3 <- sdmTMB_cv(
+  catch ~ 0 + year_f + size_bin + poly(slack_z, 2) +
+    depth_z + poly(moon_z, 2) +
+    slope_z + month:size_bin,
   offset = "offset",
   data = catch_size,
   mesh = sdm_mesh1,

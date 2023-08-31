@@ -2,7 +2,7 @@
 # August 7, 2020
 # updated Feb 22, 2023
 # Given cross-validation (catch_sdm_cv.R) and goals of analysis, utilize
-# month focused spatio temporal model
+# year focused spatio temporal model (unlike catch_sdm)
 # Also include static spatial variables (e.g. depth/slope) and dynamic 
 # fine-scale (e.g. time of day) 
 
@@ -63,12 +63,12 @@ catch_size <- expand.grid(
   mutate(
     size_bin = as.factor(size_bin),
     # pool undersampled months
-    month_f = case_when(
-      month %in% c(4, 5) ~ 5,
-      month %in% c(8, 9) ~ 8,
-      TRUE ~ month
-    ) %>% 
-      as.factor(),
+    # month_f = case_when(
+    #   month %in% c(4, 5) ~ 5,
+    #   month %in% c(8, 9) ~ 8,
+    #   TRUE ~ month
+    # ) %>% 
+    #   as.factor(),
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
@@ -116,9 +116,6 @@ ggplot(catch_size) +
 sdm_mesh1 <- make_mesh(catch_size,
                       c("xUTM_ds", "yUTM_ds"),
                       n_knots = 175)
-# sdm_mesh2 <- make_mesh(catch_size,
-#                        c("xUTM_ds", "yUTM_ds"),
-#                        n_knots = 150)
 
 
 # SPATIAL PREDICTION GRID ------------------------------------------------------
@@ -130,10 +127,9 @@ pred_bathy_grid <- readRDS(
 # generate combinations for month/year
 pred_dat <- expand.grid(
   week = seq(min(catch_size$week), max(catch_size$week), length = 5),
-  year_f = unique(catch_size$year_f),
+  year = unique(catch_size$year),
   size_bin = unique(catch_size$size_bin)
-) %>% 
- filter(year_f == "2021") 
+) 
 
 pred_grid_list <- vector(mode = "list", length = nrow(pred_dat))
 for (i in seq_along(pred_grid_list)) {
@@ -141,7 +137,7 @@ for (i in seq_along(pred_grid_list)) {
     filter(X < max(catch_size$xUTM + 1000) & X > min(catch_size$xUTM - 1000),
            Y < max(catch_size$yUTM + 1000) & Y > min(catch_size$yUTM - 1000)) %>% 
     mutate(week = pred_dat$week[i],
-           year_f = pred_dat$year_f[i],
+           year = pred_dat$year[i],
            size_bin = pred_dat$size_bin[i])
 }
 
@@ -150,16 +146,15 @@ pred_grid <- pred_grid_list %>%
   mutate(
     xUTM_ds = X / 1000,
     yUTM_ds = Y / 1000,
+    # month_f = case_when(
+    #   week < 23 ~ 5,
+    #   week >= 23 & week < 27 ~ 6,
+    #   week >= 27 & week < 32 ~ 7,
+    #   week >= 32 ~ 8
+    # ) %>% 
+    #   as.factor(),
     slack_z = 0,
     moon_z = 0,
-    month = case_when(
-      week < 19 ~ 4,
-      week >= 19 & week < 23 ~ 5,
-      week >= 23 & week < 27 ~ 6,
-      week >= 27 & week < 32 ~ 7,
-      week >= 32 & week < 35 ~ 8,
-      week >= 35 ~ 9
-    ),
     week_z = (week - mean(catch_size$week)) / sd(catch_size$week),
     depth_z = (depth - mean(catch_size$mean_depth)) / 
       sd(catch_size$mean_depth),
@@ -192,26 +187,6 @@ ggplot() +
 
 # SPATIAL MODELS ---------------------------------------------------------------
 
-fit <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
-    depth_z + poly(moon_z, 2) +
-    slope_z + week_z:size_bin,
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  # spatial_varying = ~ 0 + size_bin,
-  time = "month",
-  spatiotemporal = "rw",
-  groups = "size_bin",
-  anisotropy = FALSE,
-  silent = FALSE
-)
-saveRDS(fit, here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
-
-# alternative model structure to test whether distributions are more variable
-# among years or seasons across size bins
 fit_year <- sdmTMB(
   catch ~ 0  + size_bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
@@ -228,80 +203,23 @@ fit_year <- sdmTMB(
   anisotropy = FALSE,
   silent = FALSE
 )
+
 saveRDS(fit_year, here::here("data", "model_fits", "fit_mvrfrw_year_juv.rds"))
 
 
-fit <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
-
-
-# 
-# f8_nb1 <- sdmTMB(
-#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
-#     depth_z + poly(moon_z, 2) +
-#     slope_z + week_z:size_bin,
-#   offset = "offset",
-#   data = catch_size,
-#   mesh = sdm_mesh1,
-#   family = sdmTMB::nbinom1(),
-#   spatial = "off",
-#   time = "month",
-#   spatial_varying = ~ 0 + size_bin,
-#   spatiotemporal = "ar1",
-#   anisotropy = TRUE,
-#   control = sdmTMBcontrol(
-#     newton_loops = 1,
-#     map = list(
-#       ln_tau_Z = factor(
-#         c(1, 2, 3)
-#       )
-#     )
-#   ),
-#   silent = FALSE
-# )
-# 
-# f7_nb1b <- sdmTMB(
-#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
-#     depth_z + poly(moon_z, 2) +
-#     slope_z + week_z:size_bin,
-#   offset = "offset",
-#   data = catch_size,
-#   mesh = sdm_mesh1,
-#   family = sdmTMB::nbinom1(),
-#   spatial = "off",
-#   spatial_varying = ~ 0 + size_bin + month_f + year_f,
-#   anisotropy = TRUE,
-#   control = sdmTMBcontrol(
-#     newton_loops = 1,
-#     map = list(
-#       ln_tau_Z = factor(
-#         c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1),
-#           rep(5, times = length(unique(catch_size$year_f)) - 1))
-#       )
-#     )
-#   ),
-#   silent = FALSE
-# )
-
-# saveRDS(f6_nb1, here::here("data", "model_fits", "f6_nb1.rds"))
-# saveRDS(f7_nb1, here::here("data", "model_fits", "f7_nb1.rds"))
-
-f6_nb1 <- readRDS(here::here("data", "model_fits", "f6_nb1.rds"))
+fit_year <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_year_juv.rds"))
 
 
 ## SIMULATION CHECKS -----------------------------------------------------------
 
-# quick check
-# sims_nb2 <- simulate(f6, nsim = 100)
-# sims_nb2 %>% 
-#   dharma_residuals(f6)
-
-sims_nb1 <- simulate(fit, nsim = 100, newdata = catch_size)
+set.seed(2023)
+sims_nb1 <- simulate(fit_year, nsim = 100, newdata = catch_size)
 sims_nb1 %>% 
-  dharma_residuals(fit)
+  dharma_residuals(fit_year)
 
 
 # sample from posterior using MCMC to avoid Laplace approximation
-object <- fit
+object <- fit_year
 samp <- sample_mle_mcmc(object, mcmc_iter = 130, mcmc_warmup = 100)
 
 obj <- object$tmb_obj
@@ -316,12 +234,12 @@ obj_mle$tmb_map <- map
 ss <- simulate(obj_mle, mcmc_samples = extract_mcmc(samp), nsim = 30)
 
 
-pred_fixed <- fit$family$linkinv(
-  predict(fit, newdata = catch_size)$est_non_rf
+pred_fixed <- fit_year$family$linkinv(
+  predict(fit_year, newdata = catch_size)$est_non_rf
 )
 r_nb1_size <- DHARMa::createDHARMa(
   simulatedResponse = ss,
-  observedResponse = fit$data$catch,
+  observedResponse = fit_year$data$catch,
   fittedPredictedResponse = pred_fixed
 )
 DHARMa::testResiduals(r_nb1_size)
@@ -330,7 +248,7 @@ DHARMa::testResiduals(r_nb1_size)
 ## FIXED EFFECT PREDICTIONS ----------------------------------------------------
 
 # quick visualization of effect size estimates 
-fes <- tidy(fit, effects = "fixed", conf.int = T)
+fes <- tidy(fit_year, effects = "fixed", conf.int = T)
 fes_trim <- fes %>% 
   filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall",
                       "size_binsublegal"),
@@ -339,29 +257,11 @@ fes_trim <- fes %>%
     effect = "fixed"
   )
 
-res <- tidy(fit, effects = "ran_par", conf.int = T) %>% 
+res <- tidy(fit_year, effects = "ran_par", conf.int = T) %>% 
   mutate(
     effect = "random"
   )
-# res_trim <- res %>% 
-#   # add unique identifier for second range term
-#   group_by(term) %>% 
-#   mutate(
-#     par_id = row_number(),
-#     term = ifelse(par_id > 1, paste(term, par_id, sep = "_"), term)
-#   ) %>% 
-#   ungroup() %>% 
-#   filter(!term %in% c("range")) %>% 
-#   dplyr::select(-par_id) %>% 
-#   mutate(
-#     term = fct_recode(
-#       as.factor(term),
-#       "large_omega" = "sigma_Z", "medium_omega" = "sigma_Z_2",
-#       "small_omega" = "sigma_Z_3", "month_omega" = "sigma_Z_4",
-#       "year_sigma" = "sigma_G"
-#     ),
-#     effect = "random"
-#   ) 
+
 
 all_terms <- rbind(fes_trim, res) %>%
   mutate(
@@ -369,10 +269,11 @@ all_terms <- rbind(fes_trim, res) %>%
       grepl("omega", term) ~ "omega",
       grepl("week", term) ~ "week",
       TRUE ~ term
-    )#,
+    ),
+    term = fct_reorder(term, effect)
     # term = fct_relevel(term, "large_omega", "medium_omega", "small_omega", 
     #                    "month_omega", "year_sigma", "phi", "depth_z", "slope_z")
-  ) 
+  )
 shape_pal <- c(21, 23)
 names(shape_pal) <- unique(all_terms$effect)
 
@@ -392,8 +293,6 @@ ggplot(all_terms %>%
 dev.off()
 
 
-# NOTE month and year values don't matter since random variables and integrated 
-# out
 pred_foo <- function(x = "week", nd, fit) {
   p <- predict(fit, newdata = nd, se_fit = FALSE, re_form = NA, 
           re_form_iid = NA, nsim = 100)
@@ -405,45 +304,44 @@ pred_foo <- function(x = "week", nd, fit) {
     )
 }
 
+# select any year since REs excluded
 nd_week <- expand.grid(
-  year_f = unique(catch_size$year_f), 
+  year = unique(catch_size$year), 
   week_z = seq(-2, 2, length = 30),
-  month = unique(catch_size$month), 
   slack_z = 0,
   moon_z = 0,
   size_bin = unique(catch_size$size_bin),
   depth_z = 0,
   slope_z = 0
 ) %>% 
-  filter(year_f == "2020", 
-         month == "7")
+  filter(year == "2020")
 
-p_week <- pred_foo(x = "week", nd = nd_week, fit = fit)
+p_week <- pred_foo(x = "week", nd = nd_week, fit = fit_year)
 
 
 # fixed depth effects
 nd_depth <- expand.grid(
-  year_f = unique(catch_size$year_f),
+  year = unique(catch_size$year),
   week_z = 0,
-  month = unique(catch_size$month),
+  # month = unique(catch_size$month),
   slack_z = 0,
   moon_z = 0,
   size_bin = unique(catch_size$size_bin),
-  depth_z = seq(-2, 2, length = 30),
+  depth_z = seq(-2, 3, length = 30),
   slope_z = 0
 ) %>% 
-  filter(size_bin == "medium", year_f == "2020", month == "7")
+  filter(size_bin == "medium", year == "2020")
 
-p_depth <- pred_foo(x = "depth", nd = nd_depth, fit = fit)
+p_depth <- pred_foo(x = "depth", nd = nd_depth, fit = fit_year)
 
 
 # fixed slope effects
 nd_slope <- nd_depth %>% 
   mutate(
-    slope_z = seq(-2, 2, length = 30),
+    slope_z = seq(min(catch_size$slope_z), 2, length = 30),
     depth_z = 0
   )
-p_slope <- pred_foo(x = "slope", nd = nd_slope, fit = fit)
+p_slope <- pred_foo(x = "slope", nd = nd_slope, fit = fit_year)
 
 
 # fixed slack effects
@@ -452,7 +350,7 @@ nd_slack <- nd_depth %>%
     slack_z = seq(-3, 3, length = 30),
     depth_z = 0
   )
-p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit)
+p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit_year)
 
 
 # fixed lunar effects
@@ -461,7 +359,7 @@ nd_moon <- nd_depth %>%
     moon_z = seq(-1.8, 1.22, length = 30),
     depth_z = 0
   )
-p_moon <- pred_foo(x = "moon", nd = nd_moon, fit = fit)
+p_moon <- pred_foo(x = "moon", nd = nd_moon, fit = fit_year)
 
 
 full_p <- list(p_week, p_depth, p_slope, p_slack, p_moon) %>% 
@@ -537,11 +435,11 @@ dev.off()
 
 ## SPATIAL PREDICTIONS ---------------------------------------------------------
 
-upsilon_pred <- predict(fit,
+upsilon_pred <- predict(fit_year,
                         newdata = pred_grid,
                         return_tmb_report = TRUE)
 
-pp <- predict(fit, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
+pp <- predict(fit_year, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
 # for now remove extra rows but check w/ Sean
 pp$upsilon_stc <- as.numeric(upsilon_pred$proj_upsilon_st_A_vec)[1:nrow(pp)]
 
@@ -555,39 +453,41 @@ week_key <- data.frame(
   )
   
 
-size_omega <- pp %>%
-  dplyr::select(-c(size_bin, week, month)) %>%
+omega <- pp %>%
+  dplyr::select(-c(size_bin, year, week)) %>%
   distinct() %>% 
   plot_map(., omega_s) +
   scale_fill_gradient2(name = "Spatial\nRF Effect") +
   theme(legend.position = "top")
 
-month_omega <- pp %>%
+upsilon <- pp %>%
   plot_map(., upsilon_stc) +
   scale_fill_gradient2(name = "Spatial\nRF Effect") +
-  facet_grid(size_bin~month) +
+  facet_grid(size_bin~year) +
   theme(legend.position = "top")
 
 full_preds <- pp %>% 
   group_by(size_bin) %>% 
   mutate(scale_est = exp(est) / max(exp(est))) %>%
   left_join(., week_key, by = "week") %>% 
+  filter(size_bin == "large") %>% 
   plot_map(., scale_est) +
   scale_fill_viridis_c(trans = "sqrt", name = "Scaled\nAbundance") +
-  facet_grid(date~size_bin)
+  facet_grid(date~year)
 
 
-png(here::here("figs", "ms_figs", "month_omega.png"), res = 250, units = "in", 
+png(here::here("figs", "ms_figs", "omega_year_model.png"), res = 250, units = "in", 
     height = 4.5, width = 4.5)
-month_omega
+omega
 dev.off()
 
-png(here::here("figs", "ms_figs", "size_omega.png"), res = 250, units = "in", 
+png(here::here("figs", "ms_figs", "upsilon_year_model.png"), res = 250, units = "in", 
     height = 7.5, width = 7.5)
-size_omega
+upsilon
 dev.off()
 
-png(here::here("figs", "ms_figs", "spatial_preds.png"), res = 250, units = "in", 
+png(here::here("figs", "ms_figs", "spatial_preds_year_largeonly.png"),
+    res = 250, units = "in", 
     height = 7.5, width = 7.5)
 full_preds
 dev.off()
