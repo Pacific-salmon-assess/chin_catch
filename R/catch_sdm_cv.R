@@ -21,16 +21,29 @@ library(sdmTMBextra)
 chin <- readRDS(here::here("data", "clean_catch.RDS")) %>% 
   rename(agg = agg_name)
 
-
 chin %>% 
   group_by(size_bin) %>% 
   tally()
+
+
+# import bycatch data representing sublegal catch
+chin_juv <- read.csv(
+  here::here("data", "bycatchData.csv"),
+  stringsAsFactors = F) %>% 
+  filter(species == "chinook",
+         !grepl("2023", event)) %>% 
+  mutate(size_bin = "sublegal") %>% 
+  dplyr::select(
+    event, size_bin, catch = count
+  )
+
 
 # calculate total catch across size bins
 catch_size1 <- chin %>% 
   group_by(event, size_bin) %>% 
   summarize(catch = n(), .groups = "drop") %>% 
-  ungroup()
+  ungroup() %>% 
+  rbind(., chin_juv)
 
 
 # clean and bind to set data
@@ -69,87 +82,14 @@ catch_size <- expand.grid(
     slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1],
     moon_z = scale(moon_illuminated)[ , 1],
-    dist_z = scale(coast_dist_km)
+    dist_z = scale(coast_dist_km)[ , 1]
   ) 
+
 
 sdm_mesh1 <- make_mesh(catch_size,
                        c("xUTM_ds", "yUTM_ds"),
-                       n_knots = 180)
+                       n_knots = 150)
 
-# original fit
-test_fit <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + size_bin + week_z:size_bin,
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "off",
-  spatial_varying = ~ 0 + size_bin + month_f,
-  anisotropy = TRUE,
-  control = sdmTMBcontrol(
-    newton_loops = 1,
-    map = list(
-      ln_tau_Z = factor(
-        c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
-      )
-    )
-  ),
-  silent = FALSE
-)
-
-est <- as.list(test_fit$sd_report, "Estimate", report = TRUE)
-se <- as.list(test_fit$sd_report, "Std. Error", report = TRUE)
-log_est = est$log_sigma_Z
-log_se = se$log_sigma_U
-
-# mvrfrw no time in mu (common spatial variability value since size-specific 
-# wouldn't converge)
-test_fit2 <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + size_bin,
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  # spatial_varying = ~ 0 + size_bin,
-  time = "month",
-  spatiotemporal = "rw",
-  groups = "size_bin",
-  anisotropy = FALSE,
-  silent = FALSE
-)
-
-# mvrfrw linear time
-test_fit3 <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + size_bin + week_z:size_bin,
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  # spatial_varying = ~ 0 + size_bin,
-  time = "month",
-  spatiotemporal = "rw",
-  groups = "size_bin",
-  anisotropy = FALSE,
-  silent = FALSE
-)
-
-# mvrfrw smooth time (fails to converge)
-test_fit4 <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + size_bin + s(week_z, k = 3),
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  # spatial_varying = ~ 0 + size_bin,
-  time = "month",
-  spatiotemporal = "rw",
-  groups = "size_bin",
-  anisotropy = FALSE,
-  silent = FALSE
-)
 
 
 ## TOTAL CATCH SPATIOTEMPORAL MODELS -------------------------------------------
@@ -159,8 +99,7 @@ ncores <- parallel::detectCores()
 future::plan(future::multisession, workers = 50L)
 
 
-# test model
-cv_6 <- sdmTMB_cv(
+cv_month <- sdmTMB_cv(
   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
     slope_z + week_z:size_bin,
@@ -168,82 +107,116 @@ cv_6 <- sdmTMB_cv(
   data = catch_size,
   mesh = sdm_mesh1,
   family = sdmTMB::nbinom1(),
-  spatial = "off",
-  spatial_varying = ~ 0 + size_bin + month_f,
-  anisotropy = TRUE,
-  control = sdmTMBcontrol(
-    newton_loops = 1,
-    map = list(
-      ln_tau_Z = factor(
-        c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
-      )
-    )
-  ),
-  silent = FALSE,
-  use_initial_fit = TRUE,
-  k_folds = 5
-)
-
-cv_8 <- sdmTMB_cv(
-  catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
-    depth_z + poly(moon_z, 2) +
-    slope_z + week_z:size_bin,
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "off",
+  spatial = "on",
   time = "month",
-  spatial_varying = ~ 0 + size_bin,
-  spatiotemporal = "ar1",
-  anisotropy = TRUE,
-  control = sdmTMBcontrol(
-    newton_loops = 1,
-    map = list(
-      ln_tau_Z = factor(
-        c(1, 2, 3)
-      )
-    )
-  ),
+  spatiotemporal = "rw",
+  groups = "size_bin",
+  anisotropy = FALSE,
   silent = FALSE,
   use_initial_fit = TRUE,
   k_folds = 5
 )
 
-cv_9 <- sdmTMB_cv(
-  catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+cv_year <- sdmTMB_cv(
+  catch ~ 0  + (1 | year_f) + size_bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
     slope_z + week_z:size_bin,
   offset = "offset",
   data = catch_size,
   mesh = sdm_mesh1,
   family = sdmTMB::nbinom1(),
-  spatial = "off",
-  spatial_varying = ~ 0 + size_bin + month_f + year_f,
-  anisotropy = TRUE,
-  control = sdmTMBcontrol(
-    newton_loops = 1,
-    map = list(
-      ln_tau_Z = factor(
-        c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1),
-          rep(5, times = length(unique(catch_size$year_f)) - 1))
-      )
-    )
-  ),
+  spatial = "on",
+  # spatial_varying = ~ 0 + size_bin,
+  time = "year",
+  spatiotemporal = "rw",
+  groups = "size_bin",
+  anisotropy = FALSE,
   silent = FALSE,
   use_initial_fit = TRUE,
   k_folds = 5
 )
 
-cv_list <- list(cv_6, cv_8, cv_9)
-saveRDS(cv_list, here::here("data", "model_fits", "cv_list.rds"))
+# 
+# # test model
+# cv_6 <- sdmTMB_cv(
+#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+#     depth_z + poly(moon_z, 2) +
+#     slope_z + week_z:size_bin,
+#   offset = "offset",
+#   data = catch_size,
+#   mesh = sdm_mesh1,
+#   family = sdmTMB::nbinom1(),
+#   spatial = "off",
+#   spatial_varying = ~ 0 + size_bin + month_f,
+#   anisotropy = TRUE,
+#   control = sdmTMBcontrol(
+#     newton_loops = 1,
+#     map = list(
+#       ln_tau_Z = factor(
+#         c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1))
+#       )
+#     )
+#   ),
+#   silent = FALSE,
+#   use_initial_fit = TRUE,
+#   k_folds = 5
+# )
+# 
+# cv_8 <- sdmTMB_cv(
+#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+#     depth_z + poly(moon_z, 2) +
+#     slope_z + week_z:size_bin,
+#   offset = "offset",
+#   data = catch_size,
+#   mesh = sdm_mesh1,
+#   family = sdmTMB::nbinom1(),
+#   spatial = "off",
+#   time = "month",
+#   spatial_varying = ~ 0 + size_bin,
+#   spatiotemporal = "ar1",
+#   anisotropy = TRUE,
+#   control = sdmTMBcontrol(
+#     newton_loops = 1,
+#     map = list(
+#       ln_tau_Z = factor(
+#         c(1, 2, 3)
+#       )
+#     )
+#   ),
+#   silent = FALSE,
+#   use_initial_fit = TRUE,
+#   k_folds = 5
+# )
+# 
+# cv_9 <- sdmTMB_cv(
+#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+#     depth_z + poly(moon_z, 2) +
+#     slope_z + week_z:size_bin,
+#   offset = "offset",
+#   data = catch_size,
+#   mesh = sdm_mesh1,
+#   family = sdmTMB::nbinom1(),
+#   spatial = "off",
+#   spatial_varying = ~ 0 + size_bin + month_f + year_f,
+#   anisotropy = TRUE,
+#   control = sdmTMBcontrol(
+#     newton_loops = 1,
+#     map = list(
+#       ln_tau_Z = factor(
+#         c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1),
+#           rep(5, times = length(unique(catch_size$year_f)) - 1))
+#       )
+#     )
+#   ),
+#   silent = FALSE,
+#   use_initial_fit = TRUE,
+#   k_folds = 5
+# )
+
+cv_list <- list(cv_month, cv_year)
+saveRDS(cv_list, here::here("data", "model_fits", "cv_list_yr_vs_month.rds"))
 
 cv_list <- readRDS(here::here("data", "model_fits", "cv_list.rds"))
-
-purrr::map(
-  cv_list,
-  ~ .x$elpd
-)
 
 purrr::map(
   cv_list,
