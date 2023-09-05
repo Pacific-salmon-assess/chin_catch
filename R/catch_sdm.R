@@ -125,7 +125,9 @@ sdm_mesh1 <- make_mesh(catch_size,
 
 # import 1.8 X 1.8 km grid generated in prep_bathymetry.R in chinTagging repo
 pred_bathy_grid <- readRDS(
-  here::here("data", "pred_bathy_grid_utm.RDS"))
+  # here::here("data", "pred_bathy_grid_utm.RDS"))
+  here::here("data", "pred_bathy_grid_utm_no_bark.RDS"))
+
 
 # generate combinations for month/year
 pred_dat <- expand.grid(
