@@ -23,7 +23,7 @@ chin <- readRDS(here::here("data", "clean_catch.RDS")) %>%
 crit_hab <- raster::shapefile(
   here::here("data", "critical_habitat_trim", 
              "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016_shrunk.shp")) %>% 
-  sp::spTransform(., CRS("+proj=utm +zone=9 +units=m"))
+  sp::spTransform(., CRS("+proj=utm +zone=10 +units=m"))
 
 
 # parallelize based on operating system (should speed up some of the spatial
@@ -75,7 +75,7 @@ dep_dat_full <- dep_dat_f(dep_list) %>%
 bc_raster <- rasterFromXYZ(dep_dat_full, 
                            crs = sp::CRS("+proj=longlat +datum=WGS84"))
 bc_raster_utm <- projectRaster(bc_raster,
-                               crs = sp::CRS("+proj=utm +zone=9 +units=m"),
+                               crs = sp::CRS("+proj=utm +zone=10 +units=m"),
                                # convert to 1000 m resolution
                                res = 1000)
 
@@ -110,7 +110,7 @@ ch_sf_list <- purrr::map(
     as(x, 'SpatialPixelsDataFrame') %>%
       as.data.frame() %>%
       st_as_sf(., coords = c("x", "y"),
-               crs = sp::CRS("+proj=utm +zone=9 +units=m"))
+               crs = sp::CRS("+proj=utm +zone=10 +units=m"))
   }
 )
 
@@ -138,7 +138,7 @@ coast_dist <- geosphere::dist2Line(p = sf::st_coordinates(ch_sf_deg),
                                    line = as(coast, 'Spatial'))
 
 coast_utm <- coast %>% 
-  sf::st_transform(., crs = sp::CRS("+proj=utm +zone=9 +units=m"))
+  sf::st_transform(., crs = sp::CRS("+proj=utm +zone=10 +units=m"))
 
 
 # combine all data
@@ -151,7 +151,8 @@ ch_grid <- data.frame(
 
 
 # interpolate missing data 
-ch_grid_interp <- VIM::kNN(ch_grid, k = 5)
+ch_grid_interp <- VIM::kNN(ch_grid, k = 5) %>% 
+  dplyr::select(-ends_with("imp"))
 
 
 ggplot() + 
@@ -162,6 +163,6 @@ ggplot() +
 
 
 # export grid
-saveRDS(ch_grid,
+saveRDS(ch_grid_interp,
         here::here("data", "pred_bathy_grid_1000m.RDS"))
 saveRDS(coast_utm, here::here("data", "coast_trim_utm.RDS"))

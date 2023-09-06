@@ -63,16 +63,18 @@ catch_size <- expand.grid(
   mutate(
     size_bin = as.factor(size_bin),
     # pool undersampled months
-    month_f = case_when(
+    month = case_when(
       month %in% c(4, 5) ~ 5,
-      month %in% c(8, 9) ~ 8,
+      # month %in% c(8, 9) ~ 8,
       TRUE ~ month
-    ) %>% 
+    ),
+    month_f = month %>% 
       as.factor(),
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
     offset = log((set_dist / 1000) * lines),
+    # effort of one corresponds to ~2 lines towed for 200 m
     depth_z = scale(mean_depth)[ , 1],
     slope_z = scale(mean_slope)[ , 1],
     slack_z = scale(hours_from_slack)[ , 1],
@@ -115,7 +117,7 @@ ggplot(catch_size) +
 # construct a few alternative meshes
 sdm_mesh1 <- make_mesh(catch_size,
                       c("xUTM_ds", "yUTM_ds"),
-                      n_knots = 175)
+                      n_knots = 125)
 # sdm_mesh2 <- make_mesh(catch_size,
 #                        c("xUTM_ds", "yUTM_ds"),
 #                        n_knots = 150)
@@ -123,11 +125,10 @@ sdm_mesh1 <- make_mesh(catch_size,
 
 # SPATIAL PREDICTION GRID ------------------------------------------------------
 
-# import 1.8 X 1.8 km grid generated in prep_bathymetry.R in chinTagging repo
+# import 1 x 1 km grid based on shrunk CH shape files and generated in 
+# prep_prediction_grid.R 
 pred_bathy_grid <- readRDS(
-  # here::here("data", "pred_bathy_grid_utm.RDS"))
-  here::here("data", "pred_bathy_grid_utm_no_bark.RDS"))
-
+  here::here("data", "pred_bathy_grid_1000m.RDS"))
 
 # generate combinations for month/year
 pred_dat <- expand.grid(
@@ -155,13 +156,13 @@ pred_grid <- pred_grid_list %>%
     slack_z = 0,
     moon_z = 0,
     month = case_when(
-      week < 19 ~ 4,
-      week >= 19 & week < 23 ~ 5,
+      week < 23 ~ 5,
       week >= 23 & week < 27 ~ 6,
       week >= 27 & week < 32 ~ 7,
       week >= 32 & week < 35 ~ 8,
       week >= 35 ~ 9
     ),
+    month_f = as.factor(month),
     week_z = (week - mean(catch_size$week)) / sd(catch_size$week),
     depth_z = (depth - mean(catch_size$mean_depth)) / 
       sd(catch_size$mean_depth),
@@ -207,16 +208,13 @@ fit <- sdmTMB(
   time = "month",
   spatiotemporal = "rw",
   groups = "size_bin",
-  anisotropy = FALSE,
+  anisotropy = TRUE,
+  share_range = FALSE,
   silent = FALSE
 )
-saveRDS(fit, here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
-
-# alternative model structure to test whether distributions are more variable
-# among years or seasons across size bins
-fit_year <- sdmTMB(
-  catch ~ 0  + size_bin + poly(slack_z, 2) +
-    depth_z + poly(moon_z, 2) +
+fit2 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin + slack_z +
+    depth_z + moon_z +
     slope_z + week_z:size_bin,
   offset = "offset",
   data = catch_size,
@@ -224,70 +222,19 @@ fit_year <- sdmTMB(
   family = sdmTMB::nbinom1(),
   spatial = "on",
   # spatial_varying = ~ 0 + size_bin,
-  time = "year",
+  time = "month",
   spatiotemporal = "rw",
   groups = "size_bin",
-  anisotropy = FALSE,
+  anisotropy = TRUE,
+  share_range = FALSE,
   silent = FALSE
 )
-saveRDS(fit_year, here::here("data", "model_fits", "fit_mvrfrw_year_juv.rds"))
+
+saveRDS(fit, here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
 
 
 fit <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
 
-
-# 
-# f8_nb1 <- sdmTMB(
-#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
-#     depth_z + poly(moon_z, 2) +
-#     slope_z + week_z:size_bin,
-#   offset = "offset",
-#   data = catch_size,
-#   mesh = sdm_mesh1,
-#   family = sdmTMB::nbinom1(),
-#   spatial = "off",
-#   time = "month",
-#   spatial_varying = ~ 0 + size_bin,
-#   spatiotemporal = "ar1",
-#   anisotropy = TRUE,
-#   control = sdmTMBcontrol(
-#     newton_loops = 1,
-#     map = list(
-#       ln_tau_Z = factor(
-#         c(1, 2, 3)
-#       )
-#     )
-#   ),
-#   silent = FALSE
-# )
-# 
-# f7_nb1b <- sdmTMB(
-#   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
-#     depth_z + poly(moon_z, 2) +
-#     slope_z + week_z:size_bin,
-#   offset = "offset",
-#   data = catch_size,
-#   mesh = sdm_mesh1,
-#   family = sdmTMB::nbinom1(),
-#   spatial = "off",
-#   spatial_varying = ~ 0 + size_bin + month_f + year_f,
-#   anisotropy = TRUE,
-#   control = sdmTMBcontrol(
-#     newton_loops = 1,
-#     map = list(
-#       ln_tau_Z = factor(
-#         c(1, 2, 3, rep(4, times = length(unique(catch_size$month_f)) - 1),
-#           rep(5, times = length(unique(catch_size$year_f)) - 1))
-#       )
-#     )
-#   ),
-#   silent = FALSE
-# )
-
-# saveRDS(f6_nb1, here::here("data", "model_fits", "f6_nb1.rds"))
-# saveRDS(f7_nb1, here::here("data", "model_fits", "f7_nb1.rds"))
-
-f6_nb1 <- readRDS(here::here("data", "model_fits", "f6_nb1.rds"))
 
 
 ## SIMULATION CHECKS -----------------------------------------------------------
@@ -327,6 +274,7 @@ r_nb1_size <- DHARMa::createDHARMa(
   fittedPredictedResponse = pred_fixed
 )
 DHARMa::testResiduals(r_nb1_size)
+# all looks good
 
 
 ## FIXED EFFECT PREDICTIONS ----------------------------------------------------
@@ -345,27 +293,27 @@ res <- tidy(fit, effects = "ran_par", conf.int = T) %>%
   mutate(
     effect = "random"
   )
-# res_trim <- res %>% 
-#   # add unique identifier for second range term
-#   group_by(term) %>% 
-#   mutate(
-#     par_id = row_number(),
-#     term = ifelse(par_id > 1, paste(term, par_id, sep = "_"), term)
-#   ) %>% 
-#   ungroup() %>% 
-#   filter(!term %in% c("range")) %>% 
-#   dplyr::select(-par_id) %>% 
-#   mutate(
-#     term = fct_recode(
-#       as.factor(term),
-#       "large_omega" = "sigma_Z", "medium_omega" = "sigma_Z_2",
-#       "small_omega" = "sigma_Z_3", "month_omega" = "sigma_Z_4",
-#       "year_sigma" = "sigma_G"
-#     ),
-#     effect = "random"
-#   ) 
+res_trim <- res %>%
+  # add unique identifier for second range term
+  group_by(term) %>%
+  mutate(
+    par_id = row_number(),
+    term = ifelse(par_id > 1, paste(term, par_id, sep = "_"), term)
+  ) %>%
+  ungroup() %>%
+  # filter(!term %in% c("range")) %>%
+  dplyr::select(-par_id)# %>%
+  # mutate(
+  #   # term = fct_recode(
+  #   #   as.factor(term),
+  #   #   "large_omega" = "sigma_Z", "medium_omega" = "sigma_Z_2",
+  #   #   "small_omega" = "sigma_Z_3", "month_omega" = "sigma_Z_4",
+  #   #   "year_sigma" = "sigma_G"
+  #   # ),
+  #   effect = "random"
+  # )
 
-all_terms <- rbind(fes_trim, res) %>%
+all_terms <- rbind(fes_trim, res_trim) %>%
   mutate(
     term2 = case_when(
       grepl("omega", term) ~ "omega",
@@ -381,7 +329,7 @@ names(shape_pal) <- unique(all_terms$effect)
 png(here::here("figs", "ms_figs", "par_ests.png"), res = 250, units = "in", 
     height = 5.5, width = 5.5)
 ggplot(all_terms %>% 
-         filter(!term == "range"), 
+         filter(!grepl("range", term)), 
        aes(y = term, x = estimate, shape = effect, fill = term2)) +
   geom_pointrange(aes(xmin = conf.low, xmax = conf.high)) +
   scale_fill_brewer(type = "qual", guide = "none") +
@@ -480,8 +428,10 @@ full_p <- list(p_week, p_depth, p_slope, p_slack, p_moon) %>%
     exp_est = exp(est),
     max_est = max(exp_est),
     scale_est = exp_est / max_est,
-    up = (est + 1.96 * est_se),
-    lo = (est - 1.96 * est_se),
+    up = (est + (stats::qnorm(0.975) * est_se)),
+    lo = (est + (stats::qnorm(0.025) * est_se)),
+    exp_up = exp(up),
+    exp_lo = exp(lo),
     scale_up = exp(up) / max_est,
     scale_lo = exp(lo) / max_est
   ) 
