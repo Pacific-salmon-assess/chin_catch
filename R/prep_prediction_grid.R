@@ -21,10 +21,9 @@ chin <- readRDS(here::here("data", "clean_catch.RDS")) %>%
 # ipes_grid_trim <- subset(ipes_grid_raw, LAT > 48.25 & LAT < 49.1) 
 
 crit_hab <- raster::shapefile(
-  here::here("data", "critical_habitat", 
-             "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016.shp")) %>% 
+  here::here("data", "critical_habitat_trim", 
+             "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016_shrunk.shp")) %>% 
   sp::spTransform(., CRS("+proj=utm +zone=9 +units=m"))
-
 
 
 # parallelize based on operating system (should speed up some of the spatial
@@ -80,12 +79,8 @@ bc_raster_utm <- projectRaster(bc_raster,
                                # convert to 1000 m resolution
                                res = 1000)
 
-
 plot(bc_raster_utm)
 plot(crit_hab, 
-     add = T,
-     border = "blue")
-plot(ipes_grid_trim, 
      add = T,
      border = "blue")
 
@@ -102,22 +97,13 @@ ch_slope <- terrain(
   ch_utm, opt = 'slope', unit = 'degrees',
   neighbors = 8
 )
-ch_aspect <- terrain(
-  ch_utm, opt = 'aspect', unit = 'degrees',
-  neighbors = 8
-)
-ch_list <- list(
-  depth = ch_utm,
-  slope = ch_slope,
-  aspect = ch_aspect
-)
 
-
-
-#TODO:
-
-ipes_sf_list <- purrr::map(
-  ipes_raster_list,
+# convert to SF
+ch_sf_list <- purrr::map(
+  list(
+    depth = ch_utm,
+    slope = ch_slope
+  ),
   function (x) {
     # leave at 1km x 1km res for inlets
     # aggregate(x, fact = 2) %>% 
@@ -130,7 +116,8 @@ ipes_sf_list <- purrr::map(
 
 
 # join depth and slope data
-ipes_sf <- st_join(ipes_sf_list$depth, ipes_sf_list$slope) 
+ch_sf <- st_join(ch_sf_list$depth, ch_sf_list$slope) 
+
 
 # coast sf for plotting and calculating distance to coastline 
 # (has to be lat/lon for dist2Line)
@@ -138,16 +125,16 @@ coast <- rbind(rnaturalearth::ne_states( "United States of America",
                                          returnclass = "sf"), 
                rnaturalearth::ne_states( "Canada", returnclass = "sf")) %>% 
   sf::st_crop(., 
-              xmin = min(dat_trim$lon), ymin = 48, 
-              xmax = max(dat_trim$lon), ymax = max(dat_trim$lat)) 
+              xmin = -126.3, ymin = 48, 
+              xmax = -125, ymax = 49.5) 
 
 ## convert to lat/lon for coast distance function 
-ipes_sf_deg <- ipes_sf %>%
+ch_sf_deg <- ch_sf %>%
   st_transform(., crs = st_crs(coast))
 
 
 # calculate distance to coastline
-coast_dist <- geosphere::dist2Line(p = sf::st_coordinates(ipes_sf_deg),
+coast_dist <- geosphere::dist2Line(p = sf::st_coordinates(ch_sf_deg),
                                    line = as(coast, 'Spatial'))
 
 coast_utm <- coast %>% 
@@ -155,54 +142,26 @@ coast_utm <- coast %>%
 
 
 # combine all data
-ipes_grid <- data.frame(
-  st_coordinates(ipes_sf[ , 1]),
-  depth = ipes_sf$depth,
-  slope = ipes_sf$slope,
+ch_grid <- data.frame(
+  st_coordinates(ch_sf[ , 1]),
+  depth = ch_sf$depth,
+  slope = ch_sf$slope,
   shore_dist = coast_dist[, "distance"]
 )
-# ipes_grid_trim <- ipes_grid %>% filter(!depth > 500)
+
 
 # interpolate missing data 
-ipes_grid_interp <- VIM::kNN(ipes_grid, k = 5)
+ch_grid_interp <- VIM::kNN(ch_grid, k = 5)
 
 
 ggplot() + 
   geom_sf(data = coast_utm) +
-  geom_raster(data = ipes_grid, aes(x = X, y = Y, fill = depth)) +
+  geom_raster(data = ch_grid, aes(x = X, y = Y, fill = depth)) +
   scale_fill_viridis_c() +
-  # geom_point(data = dat_trim, aes(x = utm_x, y = utm_y),
-  #            fill = "white",
-  #            shape = 21) +
   ggsidekick::theme_sleek()
 
 
-# subset WCVI predictive grid to make IPES only
-ipes_grid_raw_sf <- st_read(
-  here::here("data", "spatial", "ipes_shapefiles", "IPES_Grid_UTM9.shp"))
-
-ipes_wcvi_sf <- st_as_sf(ipes_grid_interp %>% 
-                           select(-ends_with("imp")),
-                         coords = c("X", "Y"),
-                         crs = st_crs(ipes_grid_raw_sf))
-
-dd <- st_intersection(ipes_grid_raw_sf, ipes_wcvi_sf)
-
-ipes_grid_only <- data.frame(
-  st_coordinates(dd[ , 1]),
-  depth = dd$depth,
-  slope = dd$slope,
-  shore_dist = dd$shore_dist
-)
-
-grid_list <- list(
-  ipes_grid = ipes_grid_only,
-  wcvi_grid = ipes_grid_interp %>% 
-    select(-ends_with("imp"))
-)
-
-
 # export grid
-saveRDS(grid_list,
-        here::here("data", "spatial", "pred_ipes_grid.RDS"))
-saveRDS(coast_utm, here::here("data", "spatial", "coast_trim_utm.RDS"))
+saveRDS(ch_grid,
+        here::here("data", "pred_bathy_grid_1000m.RDS"))
+saveRDS(coast_utm, here::here("data", "coast_trim_utm.RDS"))
