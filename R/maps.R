@@ -43,9 +43,24 @@ wCan <- map_data("worldHires", region = c("usa", "canada")) %>%
   filter(long < -110) %>%
   fortify(.)
 
-crop_coast <- readRDS(here::here("data", "crop_coast_sf.rds")) %>% 
-  st_crop(., xmin = -126.3, ymin = 48.45, xmax = -125.15, ymax = 49) 
 
+# plot relative to critical habitat
+coast <- readRDS(here::here("data", "crop_coast_sf.rds")) %>% 
+  st_crop(., xmin = -127, ymin = 48, xmax = -124, ymax = 49.1) 
+crit_hab_full <- raster::shapefile(
+  here::here("data", "critical_habitat", 
+             "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016.shp")) %>% 
+  sp::spTransform(., CRS("+proj=longlat +datum=WGS84"))
+ggplot() +
+  geom_sf(data = coast, color = "black", fill = "white", size = 1.25) +
+  geom_polygon(data = crit_hab_full, aes(x = long, y = lat, group = group), 
+             colour = "red", fill = NA, lwd = 1) +
+  geom_point(data = sets, aes(x = lon, y = lat, colour = as.factor(year)),
+             inherit.aes = FALSE, alpha = 0.2)
+  
+
+crop_coast <- coast %>% 
+  st_crop(., xmin = -126.3, ymin = 48.45, xmax = -125.15, ymax = 49) 
 
 sets_only <- ggplot() +
   geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
