@@ -1,7 +1,6 @@
 ## Fit stock-based spatial distribution models
 # July 5, 2023
-# Uses parameter estimates generated in catch_sdm as priors for stock-specific
-# models
+# As in catch_sdm_mvrw, fits different groups using MVRW
 
 library(tidyverse)
 library(sdmTMB)
@@ -61,7 +60,8 @@ catch_stock <- expand.grid(
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
-    offset = log((set_dist / 1000) * lines),
+    effort = (set_dist / 1000) * lines,
+    offset = log(effort),
     # effort of one corresponds to ~2 lines towed for 200 m
     depth_z = scale(mean_depth)[ , 1],
     slope_z = scale(mean_slope)[ , 1],
@@ -71,6 +71,22 @@ catch_stock <- expand.grid(
     dist_z = scale(coast_dist_km)[ , 1]
   ) %>% 
   droplevels()
+
+
+# check average cpue by week/size bin
+catch_stock %>% 
+  group_by(week, agg, year) %>% 
+  summarize(
+    sum_catch = sum(catch),
+    sum_effort = sum(effort)
+  ) %>% 
+  mutate(
+    cpue = sum_catch / sum_effort
+  ) %>% 
+  ggplot(.) +
+  geom_point(aes(x = week, y = log(cpue))) +
+  facet_wrap(~agg)
+
 
 
 # BUILD MESHES -----------------------------------------------------------------
@@ -90,7 +106,7 @@ pred_bathy_grid <- readRDS(
 
 # generate combinations for month/year
 pred_dat <- expand.grid(
-  week = seq(min(catch_size$week), max(catch_size$week), length = 5),
+  week = c(18.5, 23, 27.5, 32, 36.5),
   year_f = unique(catch_size$year_f),
   size_bin = unique(catch_size$size_bin)
 ) %>% 
@@ -147,7 +163,7 @@ plot_map <- function(dat, column) {
 
 # fit MVRW version w/ top four stocks
 fit_full <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + agg + depth_z + slope_z + week_z,
+  catch ~ 0 + (1 | year_f) + agg + depth_z + slope_z + poly(week_z, 2):agg,
   offset = "offset",
   data = catch_stock,
   mesh = sdm_mesh1,
@@ -158,174 +174,11 @@ fit_full <- sdmTMB(
   spatiotemporal = "rw",
   groups = "agg",
   anisotropy = TRUE,
-  share_range = TRUE,
-  silent = FALSE
-)
-fit_full2 <- update(fit_full, share_range = FALSE)
-
-
-# fit individual stock models
-
-stock_tbl <- catch_stock %>% 
-  group_by(agg) %>% 
-  group_nest()
-
-fit_list <- purrr::map(
-  stock_tbl$data,
-  
-  ~ sdmTMB(
-    catch ~ week_z + (1 | year_f),
-    offset = "offset",
-    data = .x,
-    mesh = sdm_mesh1,
-    family = sdmTMB::nbinom1(),
-    spatial = "on",
-    time = "month",
-    spatiotemporal = "rw",
-    anisotropy = TRUE,
-    silent = FALSE
-  )
-)
-
-
-f3 <- sdmTMB(
-  catch ~ week_z + (1 | year_f),
-  offset = "offset",
-  data = fr_sub,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  anisotropy = FALSE,
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 5),
-    b = normal(
-      #mean
-      c(-2.5, 0.25),
-      #sd
-      c(2, 1)
-    ),
-    matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
-  ),
-  silent = FALSE
-)
-f3b <- sdmTMB(
-  catch ~ week_z + depth_z + slope_z + (1 | year_f),
-  offset = "offset",
-  data = fr_sub,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  anisotropy = FALSE,
-  priors = sdmTMBpriors(
-    phi = halfnormal(0, 5),
-    b = normal(
-      #mean
-      c(-2.5, 0.25, -0.25, 0.25),
-      #sd
-      c(2, 1, 1, 1)
-    ),
-    matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
-  ),
+  share_range = FALSE,
   silent = FALSE
 )
 
-# fails to converge
-# f4 <- sdmTMB(
-#   catch ~ week_z + (1 | year_f),
-#   offset = "offset",
-#   data = fr_sub,
-#   mesh = sdm_mesh1,
-#   family = sdmTMB::nbinom1(),
-#   spatial = "off",
-#   spatial_varying = ~ 0 + month_f,
-#   anisotropy = FALSE,
-#   priors = sdmTMBpriors(
-#     b = normal(
-#       #mean
-#       c(-2.5, 0.25),
-#       #sd
-#       c(2, 1)
-#     ),
-#     matern_s = pc_matern(range_gt = 40, sigma_lt = 10)
-#   ),
-#   control = sdmTMBcontrol(
-#     newton_loops = 1,
-#     start = list(
-#       ln_phi = log(0.16) #approximate value estimated in catch_sdm
-#     ),
-#     map = list(
-#       ln_phi = factor(NA),
-#       ln_tau_Z = factor(
-#         seq(1, length(unique(catch_stock$month_f)), by = 1)
-#       )
-#     )
-#   ),
-#   silent = FALSE
-# )
-
-f5 <- sdmTMB(
-  catch ~ week_z + (1 | year_f),
-  offset = "offset",
-  data = fr_sub,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  time = "month",
-  spatiotemporal = "iid",
-  anisotropy = FALSE,
-  priors = sdmTMBpriors(
-    b = normal(
-      #mean
-      c(-2.5, 0.25),
-      #sd
-      c(2, 1)
-    ),
-    matern_s = pc_matern(range_gt = 40, sigma_lt = 10),
-    matern_st = pc_matern(range_gt = 40, sigma_lt = 10)
-  ),
-  control = sdmTMBcontrol(
-    newton_loops = 1,
-    start = list(
-      ln_phi = log(0.16) #approximate value estimated in catch_sdm
-    ),
-    map = list(
-      ln_phi = factor(NA)
-      )
-  ),
-  silent = FALSE
-)
-# fails to converge
-# f5b <- sdmTMB(
-#   catch ~ week_z + depth_z + slope_z + (1 | year_f),
-#   offset = "offset",
-#   data = fr_sub,
-#   mesh = sdm_mesh1,
-#   family = sdmTMB::nbinom1(),
-#   spatial = "on",
-#   time = "month",
-#   spatiotemporal = "iid",
-#   anisotropy = FALSE,
-#   priors = sdmTMBpriors(
-#     b = normal(
-#       #mean
-#       c(-2.5, 0.25, -0.25, 0.25),
-#       #sd
-#       c(2, 1, 1, 1)
-#     ),
-#     matern_s = pc_matern(range_gt = 40, sigma_lt = 10),
-#     matern_st = pc_matern(range_gt = 40, sigma_lt = 10)
-#   ),
-#   control = sdmTMBcontrol(
-#     newton_loops = 1,
-#     start = list(
-#       ln_phi = log(0.16) #approximate value estimated in catch_sdm
-#     ),
-#     map = list(
-#       ln_phi = factor(NA)
-#     )
-#   ),
-#   silent = FALSE
-# )
+fit_full2 <- update(fit_full, anisotropy = FALSE, share_range = TRUE)
 
 
 # check most complicated model

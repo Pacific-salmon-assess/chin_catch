@@ -244,11 +244,6 @@ fit <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
 
 ## SIMULATION CHECKS -----------------------------------------------------------
 
-# quick check
-# sims_nb2 <- simulate(f6, nsim = 100)
-# sims_nb2 %>% 
-#   dharma_residuals(f6)
-
 sims_nb1 <- simulate(fit, nsim = 100, newdata = catch_size)
 sims_nb1 %>% 
   dharma_residuals(fit)
