@@ -53,30 +53,140 @@ catch_stock <- expand.grid(
     # pool undersampled months
     month = case_when(
       month %in% c(4, 5) ~ 5,
-      month %in% c(8, 9) ~ 8,
+      # month %in% c(8, 9) ~ 8,
       TRUE ~ month
     ),
-    month_f = as.factor(month),
+    month_f = month %>% 
+      as.factor(),
     year_f = as.factor(year),
     yUTM_ds = yUTM / 1000,
     xUTM_ds = xUTM / 1000,
     offset = log((set_dist / 1000) * lines),
+    # effort of one corresponds to ~2 lines towed for 200 m
     depth_z = scale(mean_depth)[ , 1],
     slope_z = scale(mean_slope)[ , 1],
     slack_z = scale(hours_from_slack)[ , 1],
     week_z = scale(week)[ , 1],
-    moon_z = scale(moon_illuminated)[ , 1]
+    moon_z = scale(moon_illuminated)[ , 1],
+    dist_z = scale(coast_dist_km)[ , 1]
   ) %>% 
   droplevels()
 
 
+# BUILD MESHES -----------------------------------------------------------------
+
+# construct a few alternative meshes
+sdm_mesh1 <- make_mesh(catch_stock,
+                       c("xUTM_ds", "yUTM_ds"),
+                       n_knots = 125)
+
+
+# SPATIAL PREDICTION GRID ------------------------------------------------------
+
+# import 1 x 1 km grid based on shrunk CH shape files and generated in 
+# prep_prediction_grid.R 
+pred_bathy_grid <- readRDS(
+  here::here("data", "pred_bathy_grid_1000m.RDS"))
+
+# generate combinations for month/year
+pred_dat <- expand.grid(
+  week = seq(min(catch_size$week), max(catch_size$week), length = 5),
+  year_f = unique(catch_size$year_f),
+  size_bin = unique(catch_size$size_bin)
+) %>% 
+  filter(year_f == "2021") 
+
+pred_grid_list <- vector(mode = "list", length = nrow(pred_dat))
+for (i in seq_along(pred_grid_list)) {
+  pred_grid_list[[i]] <- pred_bathy_grid %>% 
+    filter(X < max(catch_size$xUTM + 1000) & X > min(catch_size$xUTM - 1000),
+           Y < max(catch_size$yUTM + 1000) & Y > min(catch_size$yUTM - 1000)) %>% 
+    mutate(week = pred_dat$week[i],
+           year_f = pred_dat$year_f[i],
+           size_bin = pred_dat$size_bin[i])
+}
+
+pred_grid <- pred_grid_list %>% 
+  bind_rows() %>% 
+  mutate(
+    xUTM_ds = X / 1000,
+    yUTM_ds = Y / 1000,
+    slack_z = 0,
+    moon_z = 0,
+    month = case_when(
+      week < 23 ~ 5,
+      week >= 23 & week < 27 ~ 6,
+      week >= 27 & week < 32 ~ 7,
+      week >= 32 & week < 35 ~ 8,
+      week >= 35 ~ 9
+    ),
+    month_f = as.factor(month),
+    week_z = (week - mean(catch_size$week)) / sd(catch_size$week),
+    depth_z = (depth - mean(catch_size$mean_depth)) / 
+      sd(catch_size$mean_depth),
+    slope_z = (slope - mean(catch_size$mean_slope)) / 
+      sd(catch_size$mean_slope)
+  ) 
+
+
+# helper function for simple predictive maps
+plot_map <- function(dat, column) {
+  ggplot() +
+    geom_raster(data = dat, aes(X, Y, fill = {{ column }})) +
+    coord_fixed() +
+    ggsidekick::theme_sleek() +
+    theme(
+      axis.text = element_blank(),
+      axis.title = element_blank()
+    )
+}
+
+
 ## FIT PRELIM MODELS -----------------------------------------------------------
 
-fr_sub <- catch_stock %>% filter(agg == "Fraser Sub.")
 
-sdm_mesh1 <- make_mesh(fr_sub,
-                       c("xUTM_ds", "yUTM_ds"),
-                       n_knots = 250)
+# fit MVRW version w/ top four stocks
+fit_full <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + agg + depth_z + slope_z + week_z,
+  offset = "offset",
+  data = catch_stock,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  # spatial_varying = ~ 0 + size_bin,
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "agg",
+  anisotropy = TRUE,
+  share_range = TRUE,
+  silent = FALSE
+)
+fit_full2 <- update(fit_full, share_range = FALSE)
+
+
+# fit individual stock models
+
+stock_tbl <- catch_stock %>% 
+  group_by(agg) %>% 
+  group_nest()
+
+fit_list <- purrr::map(
+  stock_tbl$data,
+  
+  ~ sdmTMB(
+    catch ~ week_z + (1 | year_f),
+    offset = "offset",
+    data = .x,
+    mesh = sdm_mesh1,
+    family = sdmTMB::nbinom1(),
+    spatial = "on",
+    time = "month",
+    spatiotemporal = "rw",
+    anisotropy = TRUE,
+    silent = FALSE
+  )
+)
+
 
 f3 <- sdmTMB(
   catch ~ week_z + (1 | year_f),
