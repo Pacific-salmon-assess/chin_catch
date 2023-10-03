@@ -233,7 +233,23 @@ fit <- sdmTMB(
   share_range = FALSE,
   silent = FALSE
 )
-
+fit2 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + size_bin + #poly(slack_z, 2) +
+    depth_z + #poly(moon_z, 2) +
+    slope_z + poly(week_z, 2):size_bin,
+  offset = "offset",
+  data = catch_size,
+  mesh = sdm_mesh1,
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  # spatial_varying = ~ 0 + size_bin,
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "size_bin",
+  anisotropy = TRUE,
+  share_range = FALSE,
+  silent = FALSE
+)
 
 saveRDS(fit, here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
 
