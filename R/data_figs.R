@@ -15,7 +15,19 @@ stage_dat <- readRDS(here::here("data", "agg_lifestage_df.RDS")) %>%
 
 
 chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
-  mutate(year_day = lubridate::yday(date)) %>% 
+  mutate(year_day = lubridate::yday(date),
+         # define hatchery
+         origin = case_when(
+           genetic_source == "PBT" ~ "hatchery",
+           clip == "Y" ~ "hatchery",
+           agg_name %in% c("Fraser", "WCVI", "ECVI") & genetic_source == "GSI" ~ 
+             "wild",
+           # cu %in% c("LFR-fall", "SWVI", "QP-fall", "CWCH-KOK", "STh-SHUR",
+           #   "EVIGStr-sum") & genetic_source == "GSI" ~ "wild",
+           agg_name %in% c("PugetSo", "Col") & clip == "N" ~ "wild",
+           TRUE ~ "unknown"
+         )
+         ) %>% 
   rename(vemco_code = acoustic_year, agg = agg_name) %>% 
   left_join(., stage_dat, by = "vemco_code") 
 
@@ -52,7 +64,9 @@ fl_preds_mean <- rbind(pred_dat, pred_dat_na) %>%
 
 chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>% 
   mutate(
-    stage = ifelse(is.na(stage) | stage == "unknown", stage_predicted, stage),
+    stage = ifelse(is.na(stage) | stage == "unknown", 
+                   paste("predicted", stage_predicted, sep = "_"),
+                   stage),
     month = lubridate::month(date),
     year = as.factor(year),
     agg_name = case_when(
@@ -84,10 +98,8 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
   ) %>% 
   dplyr::select(
     fish, vemco_code, event, date, year, month, year_day, deployment_time,
-    fl, size_bin, lipid, clip, stage, stock, cu, agg_name
-  ) %>% 
-  # remove under size Chinook
-  filter(!fl < 55)
+    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg_name
+  ) 
 
 
 # summary of sample sizes
@@ -111,7 +123,7 @@ total_comp_table <- chin %>%
 
 # table of clipping rates
 clip_table <- chin %>% 
-  group_by(agg_name, cu, clip) %>% 
+  group_by(agg_name, cu, origin) %>% 
   tally() %>% 
   print(n = Inf)
 
