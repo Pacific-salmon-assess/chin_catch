@@ -257,7 +257,7 @@ ggplot(chin %>% filter(!is.na(lipid), !is.na(agg_name))) +
 ## size and lipid boxplots 
 fl_bp <- chin %>%
   filter(!is.na(agg_name)) %>%
-  ggplot(., aes(x = agg_name, y = fl, fill = agg_name)) +
+  ggplot(., aes(x = agg_name, y = fl, fill = stage)) +
   geom_boxplot() +
   scale_fill_viridis_d(guide = "none") +
   labs(y = "Fork Length") +
@@ -270,7 +270,7 @@ fl_bp <- chin %>%
 lipid_bp <- chin %>%
   filter(!is.na(agg_name),
          !is.na(lipid)) %>%
-  ggplot(., aes(x = agg_name, y = lipid, fill = agg_name)) +
+  ggplot(., aes(x = agg_name, y = lipid, fill = stage)) +
   geom_boxplot() +
   scale_fill_viridis_d(guide = "none") +
   labs(y = "Lipid Content") +
@@ -306,10 +306,10 @@ chin_fl <- chin %>%
 fit_fl <- gam(
   fl ~ s(year_day, bs = "tp", m = 2, k = 4) + 
     s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
+    s(year_day, by = agg_name, bs = "tp", m = 1, k = 4) +  
     s(agg_name, bs = "re") + s(year, bs = "re"),
   data = chin_fl,
-  method = "REML",
-  link =
+  method = "REML"
 )
 
 chin_lipid <- chin %>% 
@@ -318,33 +318,40 @@ chin_lipid <- chin %>%
 
 fit_lipid <- gam(
   lipid ~ s(fl, bs = "tp", m = 2, k = 4) + 
+    s(fl, by = agg_name, bs = "tp", m = 1, k = 4) +  
     s(year_day, bs = "tp", m = 2, k = 4) + 
-    s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
+    s(year_day, by = stage, bs = "tp", m = 1, k = 4) +
+    stage + origin + 
+    s(year_day, by = agg_name, bs = "tp", m = 1, k = 4) +  
     s(agg_name, bs = "re") + s(year, bs = "re"),
-  data = chin_fl,
-  method = "REML"
-  # family = Gamma(link = "log")
-)
-fit_lipid2 <- gam(
-  lipid ~ s(fl, bs = "tp", m = 2, k = 4) + 
-    s(year_day, bs = "tp", m = 2, k = 4) + 
-    s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
-    s(agg_name, bs = "re") + s(year, bs = "re"),
-  data = chin_fl,
-  method = "REML"
+  data = chin_lipid,
+  method = "REML",
+  family = Gamma(link = "log")
 )
 
 ## checks
-sim_lipid <- simulate(fit_lipid2, newdata = chin_lipid, nsim = 50) %>% 
+sim_lipid <- simulate(fit_lipid, newdata = chin_lipid, nsim = 50) %>% 
   as.matrix()
-fix_pred <- predict(fit_lipid2, newdata = chin_lipid, type = "response") %>% 
-  as.numeric()
+fix_pred <- predict(fit_lipid, newdata = chin_lipid, type = "response") %>% 
+  as.numeric() 
 dharma_res <- DHARMa::createDHARMa(
       simulatedResponse = sim_lipid,
       observedResponse = chin_lipid$lipid,
       fittedPredictedResponse = fix_pred
     )
 plot(dharma_res)
+
+sim_fl <- simulate(fit_fl, newdata = chin_fl, nsim = 50) %>% 
+  as.matrix()
+fix_pred <- predict(fit_fl, newdata = chin_fl, type = "response") %>% 
+  as.numeric() 
+dharma_res <- DHARMa::createDHARMa(
+  simulatedResponse = sim_fl,
+  observedResponse = chin_fl$fl,
+  fittedPredictedResponse = fix_pred
+)
+plot(dharma_res)
+
 
 
 ## predictions
@@ -359,8 +366,89 @@ fl_stage <- chin %>%
 # yday preds
 new_yday <- expand.grid(
   year_day = seq(120, 260, by = 5),
-  stage = unique(chin$stage)
+  stage = unique(chin$stage),
+  # similar patterns for all origins
+  origin = "hatchery",#unique(chin$origin),
+  # since predicting only on fixed effects factor levels don't matter
+  agg_name = "ECVI",
+  year = "2022"
 ) %>% 
   left_join(., fl_stage, by = "stage") 
 
-fl_preds <- predict(fit_fl, newdata = fit_fl)
+
+fl_preds <- predict(
+  fit_fl, newdata = new_yday, se.fit = TRUE,
+  # include only FE terms
+  terms = c("(Intercept)", "stageimmature", "originwild", "originunknown",
+            "s(year_day)", "s(year_day):stagemature", 
+            "s(year_day):stageimmature")
+)
+lipid_preds_yday <- predict(
+  fit_lipid, newdata = new_yday, se.fit = TRUE, type = "response",
+  # include only FE terms
+  terms = c("(Intercept)", "stageimmature", "originwild", "originunknown",
+            "s(year_day)", "s(year_day):stagemature", 
+            "s(year_day):stageimmature", "s(fl)")
+)
+
+new_dat <- new_yday %>% 
+  mutate(
+    pred_fl = as.numeric(fl_preds$fit),
+    lo_fl = pred_fl + (stats::qnorm(0.025) * as.numeric(fl_preds$se.fit)), 
+    up_fl = pred_fl + (stats::qnorm(0.975) * as.numeric(fl_preds$se.fit)),
+    pred_lipid = as.numeric(lipid_preds_yday$fit),
+    lo_lipid = pred_lipid + (stats::qnorm(0.025) * 
+                               as.numeric(lipid_preds_yday$se.fit)), 
+    up_lipid = pred_lipid + (stats::qnorm(0.975) * 
+                               as.numeric(lipid_preds_yday$se.fit))
+  )
+
+ggplot(new_dat) +
+  geom_line(aes(x = year_day, y = pred_fl, colour = stage)) +
+  geom_ribbon(aes(x = year_day, ymin = lo_fl, ymax = up_fl, fill = stage), 
+              alpha = 0.3) +
+  ggsidekick::theme_sleek()
+
+ggplot(new_dat) +
+  geom_line(aes(x = year_day, y = pred_lipid, colour = stage)) +
+  geom_ribbon(aes(x = year_day, ymin = lo_lipid, ymax = up_lipid, fill = stage), 
+              alpha = 0.3) +
+  ggsidekick::theme_sleek() 
+
+
+# yday preds
+new_fl <- expand.grid(
+  fl = seq(65, 95, by = 1),
+  # one stage since maturity confounded with size
+  stage = "mature",
+  # similar patterns for all origins
+  origin = "hatchery",#unique(chin$origin),
+  # since predicting only on fixed effects factor levels don't matter
+  agg_name = "ECVI",
+  year = "2022",
+  year_day = mean(chin$year_day)
+) 
+
+lipid_preds_fl <- predict(
+  fit_lipid, newdata = new_fl, se.fit = TRUE, type = "response",
+  # include only FE terms
+  terms = c("(Intercept)", "stageimmature", "originwild", "originunknown",
+            "s(year_day)", "s(year_day):stagemature", 
+            "s(fl)")
+)
+
+new_dat2 <- new_fl %>% 
+  mutate(
+    pred_lipid = as.numeric(lipid_preds_fl$fit),
+    lo_lipid = pred_lipid + (stats::qnorm(0.025) * 
+                               as.numeric(lipid_preds_fl$se.fit)), 
+    up_lipid = pred_lipid + (stats::qnorm(0.975) * 
+                               as.numeric(lipid_preds_fl$se.fit))
+  )
+
+ggplot(new_dat2) +
+  geom_line(aes(x = fl, y = pred_lipid)) +
+  geom_ribbon(aes(x = fl, ymin = lo_lipid, ymax = up_lipid), 
+              alpha = 0.3) +
+  ggsidekick::theme_sleek()
+

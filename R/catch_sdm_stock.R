@@ -400,3 +400,22 @@ png(here::here("figs", "ms_figs_stock", "spatial_preds.png"), res = 250, units =
     height = 7.5, width = 7.5)
 full_preds
 dev.off()
+
+
+## subsetted version of above for presentation
+full_preds_trim <- pp %>% 
+  filter(agg %in% c("Fraser Sub.", "PugetSo")) %>% 
+  group_by(agg) %>% 
+  mutate(scale_est = exp(est) / max(exp(est))) %>%
+  left_join(., week_key, by = "week") %>% 
+  plot_map(., scale_est) +
+  scale_fill_viridis_c(trans = "sqrt", name = "Scaled\nAbundance") +
+  facet_grid(agg~date)  +
+  theme(legend.position = "top",
+        legend.key.size = unit(0.9, 'cm'))
+
+png(here::here("figs", "spatial_preds_pres.png"), res = 250, 
+    units = "in", 
+    height = 4.5, width = 7.5)
+full_preds_trim
+dev.off()
