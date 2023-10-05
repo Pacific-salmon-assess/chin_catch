@@ -317,14 +317,34 @@ chin_lipid <- chin %>%
          !is.na(agg_name))
 
 fit_lipid <- gam(
-  lipid ~ s(fl, bs = "tp", m = 1, k = 4) + 
+  lipid ~ s(fl, bs = "tp", m = 2, k = 4) + 
     s(year_day, bs = "tp", m = 2, k = 4) + 
     s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
     s(agg_name, bs = "re") + s(year, bs = "re"),
   data = chin_fl,
-  method = "REML",
-  family = Gamma(link = "log")
+  method = "REML"
+  # family = Gamma(link = "log")
 )
+fit_lipid2 <- gam(
+  lipid ~ s(fl, bs = "tp", m = 2, k = 4) + 
+    s(year_day, bs = "tp", m = 2, k = 4) + 
+    s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
+    s(agg_name, bs = "re") + s(year, bs = "re"),
+  data = chin_fl,
+  method = "REML"
+)
+
+## checks
+sim_lipid <- simulate(fit_lipid2, newdata = chin_lipid, nsim = 50) %>% 
+  as.matrix()
+fix_pred <- predict(fit_lipid2, newdata = chin_lipid, type = "response") %>% 
+  as.numeric()
+dharma_res <- DHARMa::createDHARMa(
+      simulatedResponse = sim_lipid,
+      observedResponse = chin_lipid$lipid,
+      fittedPredictedResponse = fix_pred
+    )
+plot(dharma_res)
 
 
 ## predictions
