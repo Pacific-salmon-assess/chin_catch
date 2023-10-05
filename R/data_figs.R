@@ -322,8 +322,8 @@ fit_lipid <- gam(
     s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
     s(agg_name, bs = "re") + s(year, bs = "re"),
   data = chin_fl,
-  method = "REML"#,
-  # family = Tweedie(p = 1.8)
+  method = "REML",
+  family = Gamma(link = "log")
 )
 
 
