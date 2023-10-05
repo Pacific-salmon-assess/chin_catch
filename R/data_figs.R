@@ -65,7 +65,8 @@ fl_preds_mean <- rbind(pred_dat, pred_dat_na) %>%
 chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>% 
   mutate(
     stage = ifelse(is.na(stage) | stage == "unknown", 
-                   paste("predicted", stage_predicted, sep = "_"),
+                   stage_predicted,
+                   # paste("predicted", stage_predicted, sep = "_"),
                    stage),
     month = lubridate::month(date),
     year = as.factor(year),
@@ -94,12 +95,20 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
     agg_name = fct_relevel(
       agg_name, "WCVI", "ECVI", "Fraser Year.", "Fraser Sub.", "PugetSo",
       "Low Col.", "Up Col.", "WA_OR", "Cali"
+    ),
+    origin = fct_relevel(
+      origin, "hatchery", "wild", "unknown"
+    ),
+    stage = fct_relevel(
+      stage, "mature", "immature"
     )
   ) %>% 
   dplyr::select(
     fish, vemco_code, event, date, year, month, year_day, deployment_time,
     fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg_name
-  ) 
+  ) %>% 
+  # remove 2023 data until GSI available
+  filter(!year == "2023")
 
 
 # summary of sample sizes
@@ -130,7 +139,6 @@ clip_table <- chin %>%
 
 # overall aggregate comp
 full_comp <- chin %>% 
-  filter(!is.na(agg_name)) %>% 
   group_by(size_bin) %>%
   mutate(size_n = n()) %>% 
   ungroup() %>% 
@@ -141,14 +149,13 @@ full_comp <- chin %>%
 full_comp_stacked <- ggplot(full_comp, 
                             aes(fill = agg_name, y = prop, x = size_bin)) + 
   geom_bar(position="stack", stat="identity") +
-  scale_fill_viridis_d(name = "Stock Aggregate") +
+  scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60") +
   labs(y = "Proportion Stock Composition", x = "Size Class") +
   ggsidekick::theme_sleek()
 
 
 # stock composition by month
 month_comp <- chin %>% 
-  filter(!is.na(agg_name)) %>% 
   group_by(month) %>%
   mutate(month_n = n()) %>% 
   ungroup() %>% 
@@ -159,34 +166,25 @@ month_comp <- chin %>%
 month_comp_stacked <- ggplot(month_comp, 
                             aes(fill = agg_name, y = prop, x = month)) + 
   geom_bar(position="stack", stat="identity") +
-  scale_fill_viridis_d(name = "Stock Aggregate") +
+  scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60" ) +
   labs(y = "Proportion Stock Composition", x = "Month") +
   ggsidekick::theme_sleek() +
   theme(axis.title.y = element_blank())
 
 
 # composition by adipose clip
-clip_comp <- chin %>% 
-  filter(!is.na(agg_name)) %>% 
-  group_by(clip) %>%
-  mutate(clip_n = n()) %>% 
-  ungroup() %>% 
-  group_by(agg_name, clip, clip_n) %>%
-  tally() %>%
-  mutate(prop = n / clip_n) 
-
-clip_comp_stacked <- ggplot(clip_comp, 
-                            aes(fill = agg_name, y = prop, x = clip)) + 
-  geom_bar(position="stack", stat="identity") +
-  scale_fill_viridis_d(guide = "none") +
-  labs(y = "Proportion Stock Composition", x = "Adipose Clipped") +
+origin_comp_stacked <- ggplot(chin, 
+                            aes(fill = agg_name, #y = prop, 
+                                x = origin)) + 
+  geom_bar(position="stack") +#, stat="identity") +
+  scale_fill_viridis_d(guide = "none", na.value = "grey60") +
+  labs(y = "Proportion Stock Composition", x = "Origin") +
   ggsidekick::theme_sleek() +
   theme(axis.title.y = element_blank())
 
 
 # composition by maturity stage
 stage_comp <- chin %>% 
-  filter(!is.na(agg_name)) %>% 
   group_by(stage) %>%
   mutate(stage_n = n()) %>% 
   ungroup() %>% 
@@ -195,15 +193,16 @@ stage_comp <- chin %>%
   mutate(prop = n / stage_n) 
 
 stage_comp_stacked <- ggplot(stage_comp, 
-                            aes(fill = agg_name, y = prop, x = stage)) + 
+                            aes(fill = agg_name, y = prop, 
+                                x = stage)) + 
   geom_bar(position="stack", stat="identity") +
-  scale_fill_viridis_d(guide = "none") +
+  scale_fill_viridis_d(guide = "none", na.value = "grey60") +
   labs(x = "Maturity Stage") +
   ggsidekick::theme_sleek() +
   theme(axis.title.y = element_blank())
 
 p1 <- cowplot::plot_grid(
-  clip_comp_stacked, stage_comp_stacked,
+  origin_comp_stacked, stage_comp_stacked,
   ncol = 2
 )
 y_grob <- grid::textGrob("Proportion Stock Composition", 
@@ -247,10 +246,17 @@ lipid_fl <- ggplot(chin %>% filter(!is.na(lipid), !is.na(agg_name))) +
   labs(x = "Fork Length", y = "Lipid Content") +
   theme(legend.position = "top", legend.title = element_blank())
 
+ggplot(chin %>% filter(!is.na(lipid), !is.na(agg_name))) +
+  geom_point(aes(x = year_day, y = fl, fill = stage), shape = 21, alpha = 0.6) +
+  scale_fill_viridis_d(option = "B", guide = "none") +
+  ggsidekick::theme_sleek() +
+  facet_wrap(~agg_name) +
+  theme(legend.position = "top", legend.title = element_blank())
 
-## size and lipid boxplots
-fl_bp <- chin %>% 
-  filter(!is.na(agg_name)) %>% 
+
+## size and lipid boxplots 
+fl_bp <- chin %>%
+  filter(!is.na(agg_name)) %>%
   ggplot(., aes(x = agg_name, y = fl, fill = agg_name)) +
   geom_boxplot() +
   scale_fill_viridis_d(guide = "none") +
@@ -261,9 +267,9 @@ fl_bp <- chin %>%
     axis.text.x = element_blank()
   )
 
-lipid_bp <- chin %>% 
+lipid_bp <- chin %>%
   filter(!is.na(agg_name),
-         !is.na(lipid)) %>% 
+         !is.na(lipid)) %>%
   ggplot(., aes(x = agg_name, y = lipid, fill = agg_name)) +
   geom_boxplot() +
   scale_fill_viridis_d(guide = "none") +
@@ -280,7 +286,61 @@ p3 <- cowplot::plot_grid(
 
 png(here::here("figs", "ms_figs", "fl_lipid.png"), res = 250, units = "in", 
     height = 5, width = 8.5)
+# lipid_fl
 cowplot::plot_grid(
   lipid_fl, p3, ncol = 2
 )
 dev.off()
+
+
+## FIT FL/CONDITION MODELs -----------------------------------------------------
+
+library(mgcv)
+
+
+## fit
+chin_fl <- chin %>% 
+  filter(!is.na(fl),
+         !is.na(agg_name))
+
+fit_fl <- gam(
+  fl ~ s(year_day, bs = "tp", m = 2, k = 4) + 
+    s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
+    s(agg_name, bs = "re") + s(year, bs = "re"),
+  data = chin_fl,
+  method = "REML",
+  link =
+)
+
+chin_lipid <- chin %>% 
+  filter(!is.na(lipid),
+         !is.na(agg_name))
+
+fit_lipid <- gam(
+  lipid ~ s(fl, bs = "tp", m = 1, k = 4) + 
+    s(year_day, bs = "tp", m = 2, k = 4) + 
+    s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
+    s(agg_name, bs = "re") + s(year, bs = "re"),
+  data = chin_fl,
+  method = "REML"#,
+  # family = Tweedie(p = 1.8)
+)
+
+
+## predictions
+
+# fl-stage 
+fl_stage <- chin %>% 
+  group_by(stage) %>% 
+  summarize(
+    fl = mean(fl, na.rm = T)
+  )
+
+# yday preds
+new_yday <- expand.grid(
+  year_day = seq(120, 260, by = 5),
+  stage = unique(chin$stage)
+) %>% 
+  left_join(., fl_stage, by = "stage") 
+
+fl_preds <- predict(fit_fl, newdata = fit_fl)
