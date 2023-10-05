@@ -367,8 +367,7 @@ fl_stage <- chin %>%
 new_yday <- expand.grid(
   year_day = seq(120, 260, by = 5),
   stage = unique(chin$stage),
-  # similar patterns for all origins
-  origin = "hatchery",#unique(chin$origin),
+  origin = unique(chin$origin),
   # since predicting only on fixed effects factor levels don't matter
   agg_name = "ECVI",
   year = "2022"
@@ -403,26 +402,45 @@ new_dat <- new_yday %>%
                                as.numeric(lipid_preds_yday$se.fit))
   )
 
-ggplot(new_dat) +
+ggplot(new_dat %>% filter(origin == "hatchery")) +
   geom_line(aes(x = year_day, y = pred_fl, colour = stage)) +
   geom_ribbon(aes(x = year_day, ymin = lo_fl, ymax = up_fl, fill = stage), 
               alpha = 0.3) +
   ggsidekick::theme_sleek()
 
-ggplot(new_dat) +
+ggplot(new_dat %>% filter(origin == "hatchery")) +
   geom_line(aes(x = year_day, y = pred_lipid, colour = stage)) +
   geom_ribbon(aes(x = year_day, ymin = lo_lipid, ymax = up_lipid, fill = stage), 
               alpha = 0.3) +
   ggsidekick::theme_sleek() 
 
 
+ggplot(
+  new_dat %>% 
+    filter(origin == "hatchery",
+           year_day == mean(new_dat$year_day))
+) +
+  geom_pointrange(aes(x = stage, y = pred_fl, ymin = lo_fl, ymax = up_fl), 
+              alpha = 0.3) +
+  ggsidekick::theme_sleek()
+
+
+ggplot(
+  new_dat %>% 
+    filter(stage == "mature",
+           year_day == mean(new_dat$year_day))
+) +
+  geom_pointrange(aes(x = origin, y = pred_fl, ymin = lo_fl, ymax = up_fl), 
+                  alpha = 0.3) +
+  ggsidekick::theme_sleek()
+
+
 # yday preds
 new_fl <- expand.grid(
   fl = seq(65, 95, by = 1),
   # one stage since maturity confounded with size
-  stage = "mature",
-  # similar patterns for all origins
-  origin = "hatchery",#unique(chin$origin),
+  stage = unique(chin$stage),
+  origin = unique(chin$origin),#unique(chin$origin),
   # since predicting only on fixed effects factor levels don't matter
   agg_name = "ECVI",
   year = "2022",
@@ -452,3 +470,19 @@ ggplot(new_dat2) +
               alpha = 0.3) +
   ggsidekick::theme_sleek()
 
+
+# FE preds
+new_stage_origin <- expand.grid(
+  stage = unique(chin$stage),
+  origin = unique(chin$origin),
+  year_day = mean(chin$year_day)
+) %>% 
+  left_join(., fl_stage, by = "stage") 
+
+fl_preds <- predict(
+  fit_fl, newdata = new_yday, se.fit = TRUE,
+  # include only FE terms
+  terms = c("(Intercept)", "stageimmature", "originwild", "originunknown",
+            "s(year_day)", "s(year_day):stagemature", 
+            "s(year_day):stageimmature")
+)
