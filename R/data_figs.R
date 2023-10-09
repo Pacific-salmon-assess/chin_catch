@@ -25,6 +25,9 @@ chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
            # cu %in% c("LFR-fall", "SWVI", "QP-fall", "CWCH-KOK", "STh-SHUR",
            #   "EVIGStr-sum") & genetic_source == "GSI" ~ "wild",
            agg_name %in% c("PugetSo", "Col") & clip == "N" ~ "wild",
+           # stocks in WA_OR coastal that are in WA and therefore def mass marked
+           stock %in% c("FORKS_CREEK_HATCHERY", "SOL_DUC_RIVER", 
+                        "TRASK_HATCHERY") & clip == "N" ~ "wild",
            TRUE ~ "unknown"
          )
          ) %>% 
@@ -130,7 +133,7 @@ total_comp_table <- chin %>%
   tally() %>% 
   print(n = Inf)
 
-# table of clipping rates
+# table of origin
 clip_table <- chin %>% 
   group_by(agg_name, cu, origin) %>% 
   tally() %>% 
@@ -155,68 +158,106 @@ full_comp_stacked <- ggplot(full_comp,
 
 
 # stock composition by month
-month_comp <- chin %>% 
+month_comp <- chin %>%
   group_by(month) %>%
-  mutate(month_n = n()) %>% 
-  ungroup() %>% 
+  mutate(month_n = n()) %>%
+  ungroup() %>%
   group_by(agg_name, month, month_n) %>%
   tally() %>%
-  mutate(prop = n / month_n) 
+  mutate(prop = n / month_n)
 
-month_comp_stacked <- ggplot(month_comp, 
-                            aes(fill = agg_name, y = prop, x = month)) + 
+month_comp_stacked <- ggplot(month_comp,
+                            aes(fill = agg_name, y = prop, x = month)) +
   geom_bar(position="stack", stat="identity") +
   scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60" ) +
   labs(y = "Proportion Stock Composition", x = "Month") +
-  ggsidekick::theme_sleek() +
-  theme(axis.title.y = element_blank())
+  ggsidekick::theme_sleek()
 
+# month_count_stacked <- ggplot(chin, 
+#        aes(fill = agg_name, #y = prop, 
+#            x = month)) + 
+#   geom_bar(position="stack") +#, stat="identity") +
+#   scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60" ) +
+#   labs(y = "Number of Individuals", x = "Origin") +
+#   ggsidekick::theme_sleek()  +
+#   theme(axis.title.y = element_blank())
 
-# composition by adipose clip
-origin_comp_stacked <- ggplot(chin, 
+# composition by origin (supplmentary)
+origin_count_stacked <- ggplot(chin, 
                             aes(fill = agg_name, #y = prop, 
                                 x = origin)) + 
   geom_bar(position="stack") +#, stat="identity") +
   scale_fill_viridis_d(guide = "none", na.value = "grey60") +
-  labs(y = "Proportion Stock Composition", x = "Origin") +
-  ggsidekick::theme_sleek() +
-  theme(axis.title.y = element_blank())
+  labs(x = "Origin", y = "Number of Individuals") +
+  ggsidekick::theme_sleek() 
+
+# origin by size class
+# origin_size_comp <- chin %>% 
+#   group_by(size_bin) %>%
+#   mutate(size_n = n()) %>% 
+#   ungroup() %>% 
+#   group_by(origin, size_bin, size_n) %>%
+#   tally() %>%
+#   mutate(prop = n / size_n) 
+# 
+# ggplot(origin_size_comp, 
+#        aes(fill = origin, y = prop, x = size_bin)) + 
+#   geom_bar(position="stack", stat="identity") +
+#   scale_fill_viridis_d(name = "Origin", na.value = "grey60" ) +
+#   labs(y = "Proportion Origin Composition", x = "Size Bin") +
+#   ggsidekick::theme_sleek() +
+#   theme(axis.title.y = element_blank())
 
 
 # composition by maturity stage
-stage_comp <- chin %>% 
-  group_by(stage) %>%
-  mutate(stage_n = n()) %>% 
-  ungroup() %>% 
-  group_by(agg_name, stage, stage_n) %>%
-  tally() %>%
-  mutate(prop = n / stage_n) 
+# stage_comp <- chin %>% 
+#   group_by(stage) %>%
+#   mutate(stage_n = n()) %>% 
+#   ungroup() %>% 
+#   group_by(agg_name, stage, stage_n) %>%
+#   tally() %>%
+#   mutate(prop = n / stage_n) 
+# 
+# stage_comp_stacked <- ggplot(stage_comp, 
+#                             aes(fill = agg_name, y = prop, 
+#                                 x = stage)) + 
+#   geom_bar(position="stack", stat="identity") +
+#   scale_fill_viridis_d(guide = "none", na.value = "grey60") +
+#   labs(x = "Maturity Stage") +
+#   ggsidekick::theme_sleek() +
+#   theme(axis.title.y = element_blank())
 
-stage_comp_stacked <- ggplot(stage_comp, 
-                            aes(fill = agg_name, y = prop, 
-                                x = stage)) + 
-  geom_bar(position="stack", stat="identity") +
+stage_count_stacked <- ggplot(chin, 
+                               aes(fill = agg_name, #y = prop, 
+                                   x = stage)) + 
+  geom_bar(position="stack") +#, stat="identity") +
   scale_fill_viridis_d(guide = "none", na.value = "grey60") +
-  labs(x = "Maturity Stage") +
+  labs(x = "Maturity Stage", y = "Number of Individuals") +
   ggsidekick::theme_sleek() +
-  theme(axis.title.y = element_blank())
+    theme(axis.title.y = element_blank())
+
 
 p1 <- cowplot::plot_grid(
-  origin_comp_stacked, stage_comp_stacked,
+  origin_count_stacked, stage_count_stacked,
   ncol = 2
 )
-y_grob <- grid::textGrob("Proportion Stock Composition", 
-                         rot = 90)
-p2 <- cowplot::plot_grid(
-  month_comp_stacked, p1, nrow = 2
-)
+# y_grob <- grid::textGrob("Number of Individuals", 
+#                          rot = 90)
+# gridExtra::grid.arrange(
+#   gridExtra::arrangeGrob(p1, left = y_grob))
+
+# p2 <- cowplot::plot_grid(
+#   month_comp_stacked, p1, nrow = 2
+# )
 
 png(here::here("figs", "ms_figs", "stock_comp.png"), res = 250, units = "in", 
     height = 5.5, width = 5.5)
-gridExtra::grid.arrange(
-  gridExtra::arrangeGrob(p2, left = y_grob))
+# gridExtra::grid.arrange(
+#   gridExtra::arrangeGrob(p2, left = y_grob))
+cowplot::plot_grid(
+  month_comp_stacked, p1, nrow = 2
+)
 dev.off()
-
 
 
 # CONDITION --------------------------------------------------------------------
@@ -244,13 +285,6 @@ lipid_fl <- ggplot(chin %>% filter(!is.na(lipid), !is.na(agg_name))) +
   ggsidekick::theme_sleek() +
   facet_wrap(~agg_name) +
   labs(x = "Fork Length", y = "Lipid Content") +
-  theme(legend.position = "top", legend.title = element_blank())
-
-ggplot(chin %>% filter(!is.na(lipid), !is.na(agg_name))) +
-  geom_point(aes(x = year_day, y = fl, fill = stage), shape = 21, alpha = 0.6) +
-  scale_fill_viridis_d(option = "B", guide = "none") +
-  ggsidekick::theme_sleek() +
-  facet_wrap(~agg_name) +
   theme(legend.position = "top", legend.title = element_blank())
 
 
@@ -402,40 +436,65 @@ new_dat <- new_yday %>%
                                as.numeric(lipid_preds_yday$se.fit))
   )
 
-ggplot(new_dat %>% filter(origin == "hatchery")) +
+# supplement
+yday_fl <- ggplot(new_dat %>% filter(origin == "hatchery")) +
   geom_line(aes(x = year_day, y = pred_fl, colour = stage)) +
   geom_ribbon(aes(x = year_day, ymin = lo_fl, ymax = up_fl, fill = stage), 
               alpha = 0.3) +
+  scale_fill_brewer(type = "qual", guide = "none") +
+  scale_colour_brewer(type = "qual", guide = "none") +
+  labs(y = "Predicted Fork Length (cm)") +
   ggsidekick::theme_sleek()
 
-ggplot(new_dat %>% filter(origin == "hatchery")) +
+# main
+yday_lipid <- ggplot(new_dat %>% filter(origin == "hatchery")) +
   geom_line(aes(x = year_day, y = pred_lipid, colour = stage)) +
   geom_ribbon(aes(x = year_day, ymin = lo_lipid, ymax = up_lipid, fill = stage), 
               alpha = 0.3) +
+  scale_fill_brewer(type = "qual", guide = "none") +
+  scale_colour_brewer(type = "qual", guide = "none") +
+  labs(y = "Predicted Lipid Content (cm)") +
   ggsidekick::theme_sleek() 
 
+# supplement (INCLUDE EFFECT SIZE ESTIMATES)
+# stage_fl <- ggplot(
+#   new_dat %>% 
+#     filter(origin == "hatchery",
+#            year_day == mean(new_dat$year_day))
+# ) +
+#   geom_pointrange(aes(x = stage, y = pred_fl, ymin = lo_fl, ymax = up_fl,
+#                       fill = stage), 
+#               shape = 21) +
+#   scale_fill_brewer(type = "qual", guide = "none") +
+#   labs(x = "Maturation Stage") +
+#   ggsidekick::theme_sleek() +
+#   theme(axis.title.y = element_blank())
+# 
+# origin_fl <- ggplot(
+#   new_dat %>% 
+#     filter(stage == "mature",
+#            year_day == mean(new_dat$year_day))
+# ) +
+#   geom_pointrange(aes(x = origin, y = pred_fl, ymin = lo_fl, ymax = up_fl,
+#                       fill = origin), shape = 21) +
+#   scale_fill_brewer(type = "qual", palette = 3, guide = "none") +
+#   labs(x = "Hatchery Origin") +
+#   ggsidekick::theme_sleek() +
+#   theme(axis.title.y = element_blank())
+# 
+# p4 <- cowplot::plot_grid(
+#   stage_fl, origin_fl, ncol = 1
+# )
+# 
+# png(here::here("figs", "ms_figs", "fl_fes.png"), res = 250, units = "in", 
+#     height = 4.5, width = 4.5)
+# y_grob2 <- grid::textGrob("Fork Length", rot = 90)
+# gridExtra::grid.arrange(
+#   gridExtra::arrangeGrob(p4, left = y_grob2))
+# dev.off()
 
-ggplot(
-  new_dat %>% 
-    filter(origin == "hatchery",
-           year_day == mean(new_dat$year_day))
-) +
-  geom_pointrange(aes(x = stage, y = pred_fl, ymin = lo_fl, ymax = up_fl), 
-              alpha = 0.3) +
-  ggsidekick::theme_sleek()
 
-
-ggplot(
-  new_dat %>% 
-    filter(stage == "mature",
-           year_day == mean(new_dat$year_day))
-) +
-  geom_pointrange(aes(x = origin, y = pred_fl, ymin = lo_fl, ymax = up_fl), 
-                  alpha = 0.3) +
-  ggsidekick::theme_sleek()
-
-
-# yday preds
+# fl preds
 new_fl <- expand.grid(
   fl = seq(65, 95, by = 1),
   # one stage since maturity confounded with size
@@ -464,7 +523,7 @@ new_dat2 <- new_fl %>%
                                as.numeric(lipid_preds_fl$se.fit))
   )
 
-ggplot(new_dat2) +
+ggplot(new_dat2 %>% filter(stage == "mature", origin == "hatchery")) +
   geom_line(aes(x = fl, y = pred_lipid)) +
   geom_ribbon(aes(x = fl, ymin = lo_lipid, ymax = up_lipid), 
               alpha = 0.3) +
