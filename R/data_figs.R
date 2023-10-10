@@ -183,9 +183,11 @@ month_comp_stacked <- ggplot(month_comp,
 #   theme(axis.title.y = element_blank())
 
 # composition by origin (supplmentary)
-origin_count_stacked <- ggplot(chin, 
-                            aes(fill = agg_name, #y = prop, 
-                                x = origin)) + 
+origin_count_stacked <- ggplot(
+  chin, 
+  aes(fill = agg_name, #y = prop, 
+      x = origin)
+) + 
   geom_bar(position="stack") +#, stat="identity") +
   scale_fill_viridis_d(guide = "none", na.value = "grey60") +
   labs(x = "Origin", y = "Number of Individuals") +
@@ -387,6 +389,46 @@ dharma_res <- DHARMa::createDHARMa(
 plot(dharma_res)
 
 
+## fixed effect sizes
+fl_fe <- broom::tidy(fit_fl, conf.int = TRUE, parametric = TRUE) %>% 
+  mutate(
+    response = "fork length"
+  )
+lipid_fe <- broom::tidy(fit_lipid, conf.int = TRUE, parametric = TRUE) %>% 
+  mutate(
+    response = "lipid"
+  )
+
+fes <- rbind(fl_fe, lipid_fe) %>% 
+  mutate(
+    covariate = ifelse(grepl("origin", term), "origin", "maturity\nstage"),
+    term = fct_recode(
+      as.factor(term), "immature" = "stageimmature", "wild" = "originwild",
+      "unknown" = "originunknown"
+    )
+  ) %>% 
+  filter(
+    !term == "(Intercept)"
+  )
+
+shape_pal <- c(21, 22)
+names(shape_pal) <- unique(fes$covariate)
+
+fe_plot <- ggplot(fes) +
+  geom_pointrange(
+    aes(x = term, y = estimate, ymin = conf.low, ymax = conf.high, 
+        shape = covariate)
+  ) +
+  facet_wrap(~response, scales = "free_y") +
+  ggsidekick::theme_sleek() +
+  geom_hline(aes(yintercept = 0), lty = 2, colour = "red")
+
+png(here::here("figs", "ms_figs", "fes.png"), res = 250, units = "in", 
+    height = 3.25, width = 6.5)
+fe_plot
+dev.off()
+
+
 
 ## predictions
 
@@ -436,62 +478,63 @@ new_dat <- new_yday %>%
                                as.numeric(lipid_preds_yday$se.fit))
   )
 
-# supplement
+
+# main
+stage_pal <- c("#1f78b4", "#a6cee3")
+names(stage_pal) <- unique(new_dat$stage)
+  
 yday_fl <- ggplot(new_dat %>% filter(origin == "hatchery")) +
   geom_line(aes(x = year_day, y = pred_fl, colour = stage)) +
   geom_ribbon(aes(x = year_day, ymin = lo_fl, ymax = up_fl, fill = stage), 
               alpha = 0.3) +
-  scale_fill_brewer(type = "qual", guide = "none") +
-  scale_colour_brewer(type = "qual", guide = "none") +
+  scale_fill_manual(values = stage_pal, guide = "none") +
+  scale_colour_manual(values = stage_pal, guide = "none") +
   labs(y = "Predicted Fork Length (cm)") +
-  ggsidekick::theme_sleek()
+  ggsidekick::theme_sleek() +
+  theme(
+    axis.title.x = element_blank()
+  ) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) 
 
-# main
 yday_lipid <- ggplot(new_dat %>% filter(origin == "hatchery")) +
   geom_line(aes(x = year_day, y = pred_lipid, colour = stage)) +
   geom_ribbon(aes(x = year_day, ymin = lo_lipid, ymax = up_lipid, fill = stage), 
               alpha = 0.3) +
-  scale_fill_brewer(type = "qual", guide = "none") +
-  scale_colour_brewer(type = "qual", guide = "none") +
+  scale_fill_manual(values = stage_pal) +
+  scale_colour_manual(values = stage_pal) +
   labs(y = "Predicted Lipid Content (cm)") +
-  ggsidekick::theme_sleek() 
+  ggsidekick::theme_sleek() +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "top",
+    legend.title = element_blank()
+  ) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) 
 
-# supplement (INCLUDE EFFECT SIZE ESTIMATES)
-# stage_fl <- ggplot(
-#   new_dat %>% 
-#     filter(origin == "hatchery",
-#            year_day == mean(new_dat$year_day))
-# ) +
-#   geom_pointrange(aes(x = stage, y = pred_fl, ymin = lo_fl, ymax = up_fl,
-#                       fill = stage), 
-#               shape = 21) +
-#   scale_fill_brewer(type = "qual", guide = "none") +
-#   labs(x = "Maturation Stage") +
-#   ggsidekick::theme_sleek() +
-#   theme(axis.title.y = element_blank())
-# 
-# origin_fl <- ggplot(
-#   new_dat %>% 
-#     filter(stage == "mature",
-#            year_day == mean(new_dat$year_day))
-# ) +
-#   geom_pointrange(aes(x = origin, y = pred_fl, ymin = lo_fl, ymax = up_fl,
-#                       fill = origin), shape = 21) +
-#   scale_fill_brewer(type = "qual", palette = 3, guide = "none") +
-#   labs(x = "Hatchery Origin") +
-#   ggsidekick::theme_sleek() +
-#   theme(axis.title.y = element_blank())
-# 
-# p4 <- cowplot::plot_grid(
-#   stage_fl, origin_fl, ncol = 1
-# )
-# 
-# png(here::here("figs", "ms_figs", "fl_fes.png"), res = 250, units = "in", 
-#     height = 4.5, width = 4.5)
-# y_grob2 <- grid::textGrob("Fork Length", rot = 90)
-# gridExtra::grid.arrange(
-#   gridExtra::arrangeGrob(p4, left = y_grob2))
-# dev.off()
+
+
+yday_legend <- cowplot::get_legend(yday_lipid)
+yday_plots1 <- cowplot::plot_grid(
+  yday_fl, 
+  yday_lipid +
+    theme(legend.position = "none"),
+  ncol = 2
+)
+x_grob_yday <- grid::textGrob("Day of Year")
+yday_plots2 <- gridExtra::grid.arrange(
+  gridExtra::arrangeGrob(yday_plots1, bottom = x_grob_yday))
+
+png(here::here("figs", "ms_figs", "yday_smooths.png"), res = 250, units = "in",
+    height = 3.5, width = 6.5)
+cowplot::plot_grid(
+  yday_legend, 
+  yday_plots2,
+  ncol = 1,
+  rel_heights = c(0.075, 1)
+)
+dev.off()
 
 
 # fl preds
@@ -523,25 +566,19 @@ new_dat2 <- new_fl %>%
                                as.numeric(lipid_preds_fl$se.fit))
   )
 
-ggplot(new_dat2 %>% filter(stage == "mature", origin == "hatchery")) +
-  geom_line(aes(x = fl, y = pred_lipid)) +
-  geom_ribbon(aes(x = fl, ymin = lo_lipid, ymax = up_lipid), 
+fl_lipid <- ggplot(new_dat2 %>% filter(stage == "mature", origin == "hatchery")) +
+  geom_line(aes(x = fl, y = pred_lipid, colour = stage)) +
+  geom_ribbon(aes(x = fl, ymin = lo_lipid, ymax = up_lipid, fill = stage), 
               alpha = 0.3) +
-  ggsidekick::theme_sleek()
+  scale_fill_manual(values = stage_pal, guide = "none") +
+  scale_colour_manual(values = stage_pal, guide = "none") +
+  ggsidekick::theme_sleek() +
+  labs(x = "Fork Length", y = "Lipid Content") +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) 
 
 
-# FE preds
-new_stage_origin <- expand.grid(
-  stage = unique(chin$stage),
-  origin = unique(chin$origin),
-  year_day = mean(chin$year_day)
-) %>% 
-  left_join(., fl_stage, by = "stage") 
-
-fl_preds <- predict(
-  fit_fl, newdata = new_yday, se.fit = TRUE,
-  # include only FE terms
-  terms = c("(Intercept)", "stageimmature", "originwild", "originunknown",
-            "s(year_day)", "s(year_day):stagemature", 
-            "s(year_day):stageimmature")
-)
+png(here::here("figs", "ms_figs", "fl_smooths.png"), res = 250, units = "in",
+    height = 4.25, width = 4.25)
+fl_lipid
+dev.off()
