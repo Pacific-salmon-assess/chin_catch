@@ -107,8 +107,9 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
     )
   ) %>% 
   dplyr::select(
-    fish, vemco_code, event, date, year, month, year_day, deployment_time,
-    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg_name
+    fish, vemco_code, event, date, year, month_f, year_day, deployment_time,
+    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, 
+    agg = agg_name
   ) %>% 
   # remove 2023 data until GSI available
   filter(!year == "2023")
@@ -123,6 +124,94 @@ chin %>%
             end_date = max(deployment_time, na.rm = T))
 
 saveRDS(chin, here::here("data", "clean_catch.RDS"))
+
+
+# PREP INDIVIDUAL DATASETS -----------------------------------------------------
+
+# clean and bind to set data
+set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>% 
+  mutate(
+    week = lubridate::week(date_time_local),
+    # pool undersampled months
+    month = case_when(
+      month %in% c(4, 5) ~ 5,
+      # month %in% c(8, 9) ~ 8,
+      TRUE ~ month
+    ),
+    month_f = month %>% 
+      as.factor()
+  )
+
+## size data (combine sublegal and adult)
+# import bycatch data representing sublegal catch
+chin_juv <- read.csv(
+  here::here("data", "bycatchData.csv"),
+  stringsAsFactors = F) %>% 
+  filter(species == "chinook",
+         !grepl("2023", event)) %>% 
+  mutate(size_bin = "sublegal") %>% 
+  dplyr::select(
+    event, size_bin, catch = count
+  )
+
+# calculate total catch across size bins
+catch_size1 <- chin %>% 
+  group_by(event, size_bin) %>% 
+  summarize(catch = n(), .groups = "drop") %>% 
+  ungroup() %>% 
+  rbind(., chin_juv)
+
+catch_size <- expand.grid(
+  event = set_dat$event,
+  size_bin = unique(catch_size1$size_bin)
+) %>%
+  arrange(event) %>%
+  left_join(., catch_size1, by = c("event", "size_bin")) %>%
+  replace_na(., replace = list(catch = 0)) %>%
+  left_join(., set_dat, by = "event")
+
+saveRDS(catch_size, here::here("data", "catch_size_pre.rds"))
+
+
+## stock comp data
+catch_stock1 <- chin  %>% 
+  filter(
+    !is.na(agg),
+    size_bin %in% c("large", "medium")
+  ) %>%
+  group_by(event, agg) %>%
+  summarize(catch = n(), .groups = "drop") %>%
+  ungroup()
+
+catch_stock <- expand.grid(
+  event = set_dat$event,
+  agg = unique(catch_stock1$agg)
+) %>%
+  arrange(event) %>%
+  left_join(., catch_stock1, by = c("event", "agg")) %>%
+  replace_na(., replace = list(catch = 0)) %>%
+  left_join(., set_dat, by = "event")
+
+saveRDS(catch_stock, here::here("data", "catch_stock_pre.rds"))
+
+
+## origin data
+catch_origin1 <- chin  %>% 
+  group_by(event, origin) %>%
+  summarize(catch = n(), .groups = "drop") %>%
+  ungroup()
+
+catch_origin <- expand.grid(
+  event = set_dat$event,
+  origin = unique(catch_origin1$origin)
+) %>%
+  arrange(event) %>%
+  left_join(., catch_origin1, by = c("event", "origin")) %>%
+  replace_na(., replace = list(catch = 0)) %>%
+  left_join(., set_dat, by = "event")
+
+saveRDS(catch_origin, here::here("data", "catch_origin_pre.rds"))
+
 
 
 # STOCK COMPOSITION ------------------------------------------------------------

@@ -15,31 +15,25 @@ sets <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
   # remove sets not on a troller
   filter(!grepl("rec", event))
 
-# chin <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>% 
-#   mutate(
-#     month = lubridate::month(deployment_time),
-#     month = case_when(
-#       month %in% c(4, 5) ~ 5,
-#       month %in% c(8, 9) ~ 8,
-#       TRUE ~ month
-#     ),
-#     month_f = as.factor(month),
-#     size_class = case_when(
-#       fl < 65 ~ "small",
-#       fl >= 65 & fl < 75 ~ "medium",
-#       fl >= 75 ~ "large"
-#     ),
-#     size_class = as.factor(size_class),
-#     year = as.factor(year),
-#     agg_name = fct_relevel(agg_name, "WCVI", "ECVI", "Fraser", "PugetSo",
-#                            "Col", "WA_OR", "Cali")
-#   ) %>% 
-#   filter(event %in% sets$event)
+# catch data pooled by tow
+catch_size <- readRDS(here::here("data", "catch_size_pre.rds"))
+catch_stock <- readRDS(here::here("data", "catch_stock_pre.rds"))
+catch_origin <- readRDS(here::here("data", "catch_origin_pre.rds"))
+
+# coastline file
+crop_coast <- readRDS(here::here("data", "crop_coast_sf.RDS")) %>% 
+  sf::st_crop(., xmin = -126.3, ymin = 48.45, xmax = -125.1, ymax = 49)
+
+# base map used for study area and catches
+base_map <- ggplot() + 
+  ggsidekick::theme_sleek() +
+  theme(axis.title = element_blank(),
+        legend.position = "top") +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))
 
 
 ## STUDY AREA ------------------------------------------------------------------
-
-set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) 
 
 # map data
 coast <- rbind(rnaturalearth::ne_states( "United States of America",
@@ -70,12 +64,6 @@ crit_hab <- sf::st_read(
               ymax = min(set_dat$yUTM + 500))
 
 
-base_map <- ggplot() + 
-  ggsidekick::theme_sleek() +
-  theme(axis.title = element_blank(),
-        legend.position = "top") +
-  scale_x_continuous(expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0))
 main_map <- base_map +
   geom_sf(data = coast_trim, fill = "darkgrey") +
   geom_sf(data = crit_hab, colour = "red", fill = "transparent", lty = 2) #+
@@ -91,9 +79,6 @@ slope_map <- base_map +
   theme(legend.position = "right",
         axis.text = element_blank())
 
-crop_coast <- readRDS(here::here("data", "crop_coast_sf.RDS")) %>% 
-# crop_coast <- coast %>%
-  sf::st_crop(., xmin = -126.3, ymin = 48.45, xmax = -125.1, ymax = 49)
 
 sets_only <- ggplot() +
   geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
@@ -126,22 +111,82 @@ png(here::here("figs", "ms_figs", "study_area.png"), res = 250, units = "in",
 p3
 dev.off()
 
-# stock_catch <- ggplot() +
-#   geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
-#   geom_point(data = chin,
-#              aes(x = lon, y = lat, fill = size_class),
-#              inherit.aes = FALSE, shape = 21, alpha = 0.5) +
-#   ggsidekick::theme_sleek() +
-#   scale_x_continuous(expand = c(0, 0)) +
-#   scale_y_continuous(expand = c(0, 0)) +
-#   scale_fill_viridis_d() +
-#   theme(axis.title = element_blank(),
-#         legend.title = element_blank(),
-#         axis.text = element_blank()) +
-#   facet_grid(agg_name~month)
-# 
-# 
-# png(here::here("figs", "ms_figs", "stock_catch_map.png"), 
-#     res = 250, units = "in", height = 5.5, width = 5.5)
-# stock_catch
-# dev.off()
+
+## CATCH MAPS ------------------------------------------------------------------
+
+# size
+blank_size <- catch_size %>% 
+  filter(catch == "0")
+pos_size <- catch_size %>% 
+  filter(!catch == "0")
+
+size_map <- base_map + 
+  geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
+  geom_point(data = blank_size, 
+             aes(x = lon, y = lat),
+             shape = 3, alpha = 0.1,
+             inherit.aes = FALSE) +
+  geom_point(data = pos_size,
+             aes(x = lon, y = lat, size = catch),
+             shape = 21, fill = "#377eb8", alpha = 0.75,
+             inherit.aes = FALSE) +
+  facet_grid(size_bin~month_f) +
+  theme(legend.position = "top",
+        axis.text = element_blank())
+
+png(here::here("figs", "ms_figs", "size_map.png"), res = 250, units = "in", 
+    height = 5.5, width = 7.5)
+size_map
+dev.off()
+
+
+# stock
+blank_stock <- catch_stock %>% 
+  filter(catch == "0")
+pos_stock <- catch_stock %>% 
+  filter(!catch == "0")
+
+stock_map <- base_map + 
+  geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
+  geom_point(data = blank_stock, 
+             aes(x = lon, y = lat),
+             shape = 3, alpha = 0.1,
+             inherit.aes = FALSE) +
+  geom_point(data = pos_stock,
+             aes(x = lon, y = lat, size = catch),
+             shape = 21, fill = "#4daf4a", alpha = 0.75,
+             inherit.aes = FALSE) +
+  facet_grid(agg~month_f) +
+  theme(legend.position = "top",
+        axis.text = element_blank())
+
+png(here::here("figs", "ms_figs", "stock_map.png"), res = 250, units = "in", 
+    height = 8.5, width = 7.5)
+stock_map
+dev.off()
+
+
+# origin
+blank_origin <- catch_origin %>% 
+  filter(catch == "0")
+pos_origin <- catch_origin %>% 
+  filter(!catch == "0")
+
+origin_map <- base_map + 
+  geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
+  geom_point(data = blank_origin, 
+             aes(x = lon, y = lat),
+             shape = 3, alpha = 0.1,
+             inherit.aes = FALSE) +
+  geom_point(data = pos_origin,
+             aes(x = lon, y = lat, size = catch),
+             shape = 21, fill = "#984ea3", alpha = 0.75,
+             inherit.aes = FALSE) +
+  facet_grid(origin~month_f) +
+  theme(legend.position = "top",
+        axis.text = element_blank())
+
+png(here::here("figs", "ms_figs", "origin_map.png"), res = 250, units = "in", 
+    height = 4.25, width = 7.5)
+origin_map
+dev.off()
