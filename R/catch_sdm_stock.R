@@ -10,45 +10,13 @@ library(sf)
 library(sdmTMBextra)
 
 
-chin <- readRDS(here::here("data", "clean_catch.RDS")) %>% 
-  rename(agg = agg_name) %>% 
-  filter(
-    !is.na(agg),
-    fl > 65
-  )
+catch_stock1 <- 
 
 
-chin %>% 
-  group_by(agg) %>% 
-  tally()
-
-
-# calculate total catch across size bins
-catch_stock1 <- chin %>%
-  filter(# remove rare stocks
-         !agg %in% c("ECVI", "Fraser Year.")) %>%
-  group_by(event, agg) %>%
-  summarize(catch = n(), .groups = "drop") %>%
-  ungroup()
-
-
-# clean and bind to set data
-set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>% 
-  mutate(
-    week = lubridate::week(date_time_local)
-  )
-
-
-catch_stock <- expand.grid(
-  event = set_dat$event,
-  agg = unique(catch_stock1$agg)
-) %>%
-  arrange(event) %>%
-  left_join(., catch_stock1, by = c("event", "agg")) %>%
-  replace_na(., replace = list(catch = 0)) %>%
-  left_join(., set_dat, by = "event") %>%
+catch_stock <- catch_stock1 %>%
   # remove sets not on a troller and tacking
-  filter(!grepl("rec", event),
+  filter(!agg %in% c("ECVI", "Fraser Year."),
+         !grepl("rec", event),
          !tack == "yes") %>%
   mutate(
     # pool undersampled months

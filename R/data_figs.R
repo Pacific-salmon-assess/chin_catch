@@ -107,7 +107,7 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
     )
   ) %>% 
   dplyr::select(
-    fish, vemco_code, event, date, year, month_f, year_day, deployment_time,
+    fish, vemco_code, event, date, year, month, year_day, deployment_time,
     fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, 
     agg = agg_name
   ) %>% 
@@ -196,7 +196,8 @@ saveRDS(catch_stock, here::here("data", "catch_stock_pre.rds"))
 
 
 ## origin data
-catch_origin1 <- chin  %>% 
+catch_origin1 <- chin  %>%
+  filter(size_bin %in% c("large", "medium")) %>% 
   group_by(event, origin) %>%
   summarize(catch = n(), .groups = "drop") %>%
   ungroup()

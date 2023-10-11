@@ -14,122 +14,63 @@ library(sf)
 library(sdmTMBextra)
 
 
-chin <- readRDS(here::here("data", "clean_catch.RDS")) %>% 
-  rename(agg = agg_name)
+## prep size data
+catch_size1 <- readRDS(here::here("data", "catch_size_pre.rds"))
 
-chin %>% 
-  group_by(size_bin) %>% 
-  tally()
-
-
-# import bycatch data representing sublegal catch
-chin_juv <- read.csv(
-  here::here("data", "bycatchData.csv"),
-  stringsAsFactors = F) %>% 
-  filter(species == "chinook",
-         !grepl("2023", event)) %>% 
-  mutate(size_bin = "sublegal") %>% 
-  dplyr::select(
-    event, size_bin, catch = count
-  )
-
-
-# calculate total catch across size bins
-catch_size1 <- chin %>% 
-  group_by(event, size_bin) %>% 
-  summarize(catch = n(), .groups = "drop") %>% 
-  ungroup() %>% 
-  rbind(., chin_juv)
-
-
-# clean and bind to set data
-set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>% 
-  mutate(
-    week = lubridate::week(date_time_local)
-  )
-
-
-catch_size <- expand.grid(
-  event = set_dat$event,
-  size_bin = unique(catch_size1$size_bin)
-) %>%
-  arrange(event) %>%
-  left_join(., catch_size1, by = c("event", "size_bin")) %>%
-  replace_na(., replace = list(catch = 0)) %>%
-  left_join(., set_dat, by = "event") %>%
+# filter and adjust data made in data_figs.R
+catch_size <- catch_size1 %>%
   # remove sets not on a troller and tacking
   filter(!grepl("rec", event),
          !tack == "yes") %>% 
+  mutate(origin = as.factor(size_bin))
+
+
+## prep stock data (small individuals already removed)
+catch_stock1 <- readRDS(here::here("data", "catch_stock_pre.rds"))
+
+catch_stock <- catch_stock1 %>%
+  # remove sets not on a troller and tacking
+  filter(!agg %in% c("ECVI", "Fraser Year."),
+         !grepl("rec", event),
+         !tack == "yes") %>% 
   mutate(
-    size_bin = as.factor(size_bin),
-    # pool undersampled months
-    month = case_when(
-      month %in% c(4, 5) ~ 5,
-      # month %in% c(8, 9) ~ 8,
-      TRUE ~ month
-    ),
-    month_f = month %>% 
-      as.factor(),
-    year_f = as.factor(year),
-    yUTM_ds = yUTM / 1000,
-    xUTM_ds = xUTM / 1000,
-    effort = (set_dist / 1000) * lines,
-    offset = log((set_dist / 1000) * lines),
-    # effort of one corresponds to ~2 lines towed for 200 m
-    depth_z = scale(mean_depth)[ , 1],
-    slope_z = scale(mean_slope)[ , 1],
-    slack_z = scale(hours_from_slack)[ , 1],
-    week_z = scale(week)[ , 1],
-    moon_z = scale(moon_illuminated)[ , 1],
-    dist_z = scale(coast_dist_km)[ , 1]
-  ) 
+    agg = as.factor(agg)
+  )
 
- 
 
-# EXP FIGS ---------------------------------------------------------------------
+## prep origin data (small individuals already removed)
+catch_origin1 <- readRDS(here::here("data", "catch_origin_pre.rds"))
 
-ggplot(catch_size) +
-  geom_boxplot(aes(x = as.factor(week), y = catch)) +
-  facet_wrap(~size_bin)
+catch_origin <- catch_origin1 %>%
+  # remove sets not on a troller and tacking
+  filter(!grepl("rec", event),
+         !tack == "yes") %>% 
+  mutate(origin = as.factor(origin))
 
-ggplot(catch_size) +
-  geom_point(aes(x = hours_from_slack, y = log(catch))) +
-  facet_wrap(~size_bin)
 
-ggplot(catch_size) +
-  geom_point(aes(x = mean_slope, y = log(catch))) +
-  facet_wrap(~size_bin)
+# join and modify 
+dat_tbl <- tibble(
+  dataset = c("size", "stock", "origin")
+) 
+dat_tbl$data <- purrr::map(
+  list(catch_size, catch_stock, catch_origin),
+  ~ .x %>% 
+    mutate(
+      year_f = as.factor(year),
+      yUTM_ds = yUTM / 1000,
+      xUTM_ds = xUTM / 1000,
+      effort = (set_dist / 1000) * lines,
+      offset = log((set_dist / 1000) * lines),
+      # effort of one corresponds to ~2 lines towed for 500 m
+      depth_z = scale(mean_depth)[ , 1],
+      slope_z = scale(mean_slope)[ , 1],
+      slack_z = scale(hours_from_slack)[ , 1],
+      week_z = scale(week)[ , 1],
+      moon_z = scale(moon_illuminated)[ , 1],
+      dist_z = scale(coast_dist_km)[ , 1]
+    )
+)
 
-ggplot(catch_size) +
-  geom_point(aes(x = mean_depth, y = log(catch))) +
-  facet_wrap(~size_bin)
-
-ggplot(catch_size) +
-  geom_point(aes(x = moon_illuminated, y = log(catch))) +
-  facet_wrap(~size_bin)
-
-ggplot(catch_size) +
-  geom_point(aes(x = offset, y = log(catch))) +
-  facet_wrap(~size_bin)
-
-# check average cpue by week/size bin
-catch_size %>% 
-  group_by(week, size_bin, year) %>% 
-  summarize(
-    sum_catch = sum(catch),
-    sum_effort = sum(effort)
-  ) %>% 
-  mutate(
-    cpue = sum_catch / sum_effort
-  ) %>% 
-  ggplot(.) +
-  geom_point(aes(x = week, y = log(cpue))) +
-  facet_wrap(~size_bin)
-
-ggplot(catch_size) +
-  geom_point(aes(x = xUTM_ds, y = yUTM_ds, size = catch), alpha = 0.3) +
-  facet_grid(month_f~size_bin) +
-  ggsidekick::theme_sleek()
 
 
 # BUILD MESHES -----------------------------------------------------------------
@@ -141,6 +82,13 @@ sdm_mesh1 <- make_mesh(catch_size,
 # sdm_mesh2 <- make_mesh(catch_size,
 #                        c("xUTM_ds", "yUTM_ds"),
 #                        n_knots = 150)
+
+dat_tbl$mesh <- purrr::map(
+  dat_tbl$data,
+  ~ make_mesh(.x,
+              c("xUTM_ds", "yUTM_ds"),
+              n_knots = 125)
+)
 
 
 # SPATIAL PREDICTION GRID ------------------------------------------------------
@@ -204,14 +152,6 @@ plot_map <- function(dat, column) {
     )
 }
 
-ggplot() +
-  geom_raster(data = pred_grid, aes(X, Y, fill = depth)) +
-  geom_point(data = set_dat %>%
-               filter(!grepl("rec", event)), 
-             aes(xUTM, yUTM, colour = as.factor(year)),
-             alpha = 0.4) +
-  coord_fixed() +
-  ggsidekick::theme_sleek()
 
 
 # SPATIAL MODELS ---------------------------------------------------------------
@@ -233,23 +173,7 @@ fit <- sdmTMB(
   share_range = FALSE,
   silent = FALSE
 )
-fit2 <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + size_bin + #poly(slack_z, 2) +
-    depth_z + #poly(moon_z, 2) +
-    slope_z + poly(week_z, 2):size_bin,
-  offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  # spatial_varying = ~ 0 + size_bin,
-  time = "month",
-  spatiotemporal = "rw",
-  groups = "size_bin",
-  anisotropy = TRUE,
-  share_range = FALSE,
-  silent = FALSE
-)
+
 
 saveRDS(fit, here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
 
