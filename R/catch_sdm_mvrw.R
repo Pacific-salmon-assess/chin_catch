@@ -22,7 +22,7 @@ catch_size <- catch_size1 %>%
   # remove sets not on a troller and tacking
   filter(!grepl("rec", event),
          !tack == "yes") %>% 
-  mutate(origin = as.factor(size_bin))
+  mutate(size_bin = as.factor(size_bin))
 
 
 ## prep stock data (small individuals already removed)
@@ -35,7 +35,8 @@ catch_stock <- catch_stock1 %>%
          !tack == "yes") %>% 
   mutate(
     agg = as.factor(agg)
-  )
+  ) %>% 
+  droplevels()
 
 
 ## prep origin data (small individuals already removed)
@@ -75,14 +76,6 @@ dat_tbl$data <- purrr::map(
 
 # BUILD MESHES -----------------------------------------------------------------
 
-# construct a few alternative meshes
-sdm_mesh1 <- make_mesh(catch_size,
-                      c("xUTM_ds", "yUTM_ds"),
-                      n_knots = 125)
-# sdm_mesh2 <- make_mesh(catch_size,
-#                        c("xUTM_ds", "yUTM_ds"),
-#                        n_knots = 150)
-
 dat_tbl$mesh <- purrr::map(
   dat_tbl$data,
   ~ make_mesh(.x,
@@ -97,48 +90,73 @@ dat_tbl$mesh <- purrr::map(
 # prep_prediction_grid.R 
 pred_bathy_grid <- readRDS(
   here::here("data", "pred_bathy_grid_1000m.RDS"))
+trim_grid <- pred_bathy_grid %>% 
+  filter(X < max(catch_size$xUTM + 1000) & X > min(catch_size$xUTM - 1000),
+         Y < max(catch_size$yUTM + 1000) & Y > min(catch_size$yUTM - 1000))
 
-# generate combinations for month/year
-pred_dat <- expand.grid(
-  # week = seq(min(catch_size$week), max(catch_size$week), length = 5),
+pred_dat_size <- expand.grid(
   week = c(18.5, 23, 27.5, 32, 36.5),
-  year_f = unique(catch_size$year_f),
-  size_bin = unique(catch_size$size_bin)
-) %>% 
- filter(year_f == "2021") 
-
-pred_grid_list <- vector(mode = "list", length = nrow(pred_dat))
-for (i in seq_along(pred_grid_list)) {
-  pred_grid_list[[i]] <- pred_bathy_grid %>% 
-    filter(X < max(catch_size$xUTM + 1000) & X > min(catch_size$xUTM - 1000),
-           Y < max(catch_size$yUTM + 1000) & Y > min(catch_size$yUTM - 1000)) %>% 
-    mutate(week = pred_dat$week[i],
-           year_f = pred_dat$year_f[i],
-           size_bin = pred_dat$size_bin[i])
+  year_f = dat_tbl$data[[1]]$year_f[[1]], # year shouldn't matter since RI
+  size_bin = unique(dat_tbl$data[[1]]$size_bin)
+) 
+pred_list_size <- vector(mode = "list", length = nrow(pred_dat_size))
+for (i in seq_along(pred_list_size)) {
+  pred_list_size[[i]] <- trim_grid %>% 
+    mutate(week = pred_dat_size$week[i],
+           year_f = pred_dat_size$year_f[i],
+           size_bin = pred_dat_size$size_bin[i])
 }
 
-pred_grid <- pred_grid_list %>% 
-  bind_rows() %>% 
-  mutate(
-    xUTM_ds = X / 1000,
-    yUTM_ds = Y / 1000,
-    slack_z = 0,
-    moon_z = 0,
-    month = case_when(
-      week < 23 ~ 5,
-      week >= 23 & week < 27 ~ 6,
-      week >= 27 & week < 32 ~ 7,
-      week >= 32 & week < 35 ~ 8,
-      week >= 35 ~ 9
-    ),
-    month_f = as.factor(month),
-    week_z = (week - mean(catch_size$week)) / sd(catch_size$week),
-    depth_z = (depth - mean(catch_size$mean_depth)) / 
-      sd(catch_size$mean_depth),
-    slope_z = (slope - mean(catch_size$mean_slope)) / 
-      sd(catch_size$mean_slope)
-    ) 
+pred_dat_stock <- expand.grid(
+  week = c(18.5, 23, 27.5, 32, 36.5),
+  year_f = dat_tbl$data[[1]]$year_f[[1]], # year shouldn't matter since RI
+  agg = unique(dat_tbl$data[[2]]$agg)
+) 
+pred_list_stock <- vector(mode = "list", length = nrow(pred_dat_stock))
+for (i in seq_along(pred_list_stock)) {
+  pred_list_stock[[i]] <- trim_grid %>% 
+    mutate(week = pred_dat_stock$week[i],
+           year_f = pred_dat_stock$year_f[i],
+           agg = pred_dat_stock$agg[i])
+}
 
+pred_dat_origin <- expand.grid(
+  week = c(18.5, 23, 27.5, 32, 36.5),
+  year_f = dat_tbl$data[[1]]$year_f[[1]], # year shouldn't matter since RI
+  origin = unique(dat_tbl$data[[3]]$origin)
+) 
+pred_list_origin <- vector(mode = "list", length = nrow(pred_dat_origin))
+for (i in seq_along(pred_list_origin)) {
+  pred_list_origin[[i]] <- trim_grid %>% 
+    mutate(week = pred_dat_origin$week[i],
+           year_f = pred_dat_origin$year_f[i],
+           origin <- pred_dat_origin$origin[i])
+}
+
+# clean lists above
+dat_tbl$pred_data <- purrr::map2(
+  list(pred_list_size, pred_list_stock, pred_list_origin),
+  dat_tbl$data,
+  ~ .x %>% 
+    bind_rows() %>% 
+    mutate(
+      xUTM_ds = X / 1000,
+      yUTM_ds = Y / 1000,
+      slack_z = 0,
+      moon_z = 0,
+      month = case_when(
+        week < 23 ~ 5,
+        week >= 23 & week < 27 ~ 6,
+        week >= 27 & week < 32 ~ 7,
+        week >= 32 & week < 35 ~ 8,
+        week >= 35 ~ 9
+      ),
+      month_f = as.factor(month),
+      week_z = (week - mean(.y$week)) / sd(.y$week),
+      depth_z = (depth - mean(.y$mean_depth)) / sd(.y$mean_depth),
+      slope_z = (slope - mean(.y$mean_slope)) / sd(.y$mean_slope)
+    ) 
+)
 
 # helper function for simple predictive maps
 plot_map <- function(dat, column) {
@@ -154,15 +172,15 @@ plot_map <- function(dat, column) {
 
 
 
-# SPATIAL MODELS ---------------------------------------------------------------
+# FIT MODELS -------------------------------------------------------------------
 
-fit <- sdmTMB(
+fit_size <- sdmTMB(
   catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
     slope_z + poly(week_z, 2):size_bin,
   offset = "offset",
-  data = catch_size,
-  mesh = sdm_mesh1,
+  data = dat_tbl$data[[1]],
+  mesh = dat_tbl$mesh[[1]],
   family = sdmTMB::nbinom1(),
   spatial = "on",
   # spatial_varying = ~ 0 + size_bin,
@@ -174,15 +192,57 @@ fit <- sdmTMB(
   silent = FALSE
 )
 
+# CONSIDER MORE COMPLEX MODEL (1 share range off, 2 slack/moon included) w/ more
+# stocks
+fit_stock <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + agg +# poly(slack_z, 2) +
+    depth_z +# poly(moon_z, 2) +
+    slope_z + poly(week_z, 2):agg,
+  offset = "offset",
+  data = dat_tbl$data[[2]],
+  mesh = dat_tbl$mesh[[2]],
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "agg",
+  anisotropy = TRUE,
+  share_range = TRUE,
+  silent = FALSE
+)
 
-saveRDS(fit, here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
+fit_origin <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + origin +# poly(slack_z, 2) +
+    depth_z + #poly(moon_z, 2) +
+    slope_z + poly(week_z, 2):origin,
+  offset = "offset",
+  data = dat_tbl$data[[3]],
+  mesh = dat_tbl$mesh[[3]],
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "origin",
+  anisotropy = TRUE,
+  share_range = FALSE,
+  silent = FALSE
+)
+
+saveRDS(fit_size, here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
+saveRDS(fit_stock, here::here("data", "model_fits", "fit_mvrfrw_stock.rds"))
+saveRDS(fit_origin, here::here("data", "model_fits", "fit_mvrfrw_origin.rds"))
 
 
-fit <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_juv.rds"))
+fit_size <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
+fit_stock <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_stock.rds"))
+fit_origin <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_origin.rds"))
 
+fit_list <- list(fit_size, fit_stock, fit_origin)
 
 
 ## SIMULATION CHECKS -----------------------------------------------------------
+
+## TODO: check all groups
 
 sims_nb1 <- simulate(fit, nsim = 100, newdata = catch_size)
 sims_nb1 %>% 
@@ -217,69 +277,30 @@ DHARMa::testResiduals(r_nb1_size)
 # all looks good
 
 
-## FIXED EFFECT PREDICTIONS ----------------------------------------------------
+## FIXED EFFECTS ---------------------------------------------------------------
 
-# quick visualization of effect size estimates 
-fes <- tidy(fit, effects = "fixed", conf.int = T)
-fes_trim <- fes %>% 
-  filter(!term %in% c("size_binlarge", "size_binmedium", "size_binsmall",
-                      "size_binsublegal"),
-         !grepl("poly", term)) %>% 
-  mutate(
-    effect = "fixed"
-  )
+# pull parameter estimates
+dat_tbl$fes <- purrr::map2(
+  fit_list,
+  dat_tbl$dataset,
+  ~ tidy(.x, effects = "fixed", conf.int = T) 
+)
+dat_tbl$res <- purrr::map2(
+  fit_list,
+  dat_tbl$dataset,
+  ~ tidy(.x, effects = "ran_par", conf.int = T) 
+)
 
-res <- tidy(fit, effects = "ran_par", conf.int = T) %>% 
-  mutate(
-    effect = "random"
-  )
-res_trim <- res %>%
-  # add unique identifier for second range term
-  group_by(term) %>%
-  mutate(
-    par_id = row_number(),
-    term = ifelse(par_id > 1, paste(term, par_id, sep = "_"), term)
-  ) %>%
-  ungroup() %>%
-  # filter(!term %in% c("range")) %>%
-  dplyr::select(-par_id)# %>%
-  # mutate(
-  #   # term = fct_recode(
-  #   #   as.factor(term),
-  #   #   "large_omega" = "sigma_Z", "medium_omega" = "sigma_Z_2",
-  #   #   "small_omega" = "sigma_Z_3", "month_omega" = "sigma_Z_4",
-  #   #   "year_sigma" = "sigma_G"
-  #   # ),
-  #   effect = "random"
-  # )
 
-all_terms <- rbind(fes_trim, res_trim) %>%
-  mutate(
-    term2 = case_when(
-      grepl("omega", term) ~ "omega",
-      grepl("week", term) ~ "week",
-      TRUE ~ term
-    )#,
-    # term = fct_relevel(term, "large_omega", "medium_omega", "small_omega", 
-    #                    "month_omega", "year_sigma", "phi", "depth_z", "slope_z")
-  ) 
-shape_pal <- c(21, 23)
-names(shape_pal) <- unique(all_terms$effect)
+# intercept plots
+dd <- dat_tbl %>% 
+  dplyr::select(dataset, fes) %>% 
+  unnest(cols = fes) %>% 
+  filter(!grepl("poly", term),
+         !(grepl("_z", term))) %>% 
+  ggplot()
+  glimpse()
 
-png(here::here("figs", "ms_figs", "par_ests.png"), res = 250, units = "in", 
-    height = 5.5, width = 5.5)
-ggplot(all_terms %>% 
-         filter(!grepl("range", term)), 
-       aes(y = term, x = estimate, shape = effect, fill = term2)) +
-  geom_pointrange(aes(xmin = conf.low, xmax = conf.high)) +
-  scale_fill_brewer(type = "qual", guide = "none") +
-  scale_shape_manual(values = shape_pal, guide = "none") +
-  ggsidekick::theme_sleek() +
-  labs(x = "Parameter Estimate") +
-  theme(
-    axis.title.y = element_blank()
-  )
-dev.off()
 
 
 # NOTE month and year values don't matter since random variables and integrated 
@@ -296,19 +317,17 @@ pred_foo <- function(x = "week", nd, fit) {
 }
 
 nd_week <- expand.grid(
-  year_f = unique(catch_size$year_f), 
+  year_f = "2020", 
   week_z = seq(-2, 2, length = 30),
-  month = unique(catch_size$month), 
+  month = 7, #unique(catch_size$month), 
   slack_z = 0,
   moon_z = 0,
-  size_bin = unique(catch_size$size_bin),
+  size_bin = unique(dat_tbl$data[[1]]$size_bin),
   depth_z = 0,
   slope_z = 0
-) %>% 
-  filter(year_f == "2020", 
-         month == "7")
+)
 
-p_week <- pred_foo(x = "week", nd = nd_week, fit = fit3)
+p_week <- pred_foo(x = "week", nd = nd_week, fit = fit)
 
 
 # fixed depth effects
