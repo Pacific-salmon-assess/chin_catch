@@ -22,7 +22,7 @@ catch_size <- catch_size1 %>%
   # remove sets not on a troller and tacking
   filter(!grepl("rec", event),
          !tack == "yes") %>% 
-  mutate(size_bin = as.factor(size_bin))
+  mutate(bin = as.factor(size_bin))
 
 
 ## prep stock data (small individuals already removed)
@@ -34,7 +34,7 @@ catch_stock <- catch_stock1 %>%
          !grepl("rec", event),
          !tack == "yes") %>% 
   mutate(
-    agg = as.factor(agg)
+    bin = as.factor(agg)
   ) %>% 
   droplevels()
 
@@ -46,7 +46,7 @@ catch_origin <- catch_origin1 %>%
   # remove sets not on a troller and tacking
   filter(!grepl("rec", event),
          !tack == "yes") %>% 
-  mutate(origin = as.factor(origin))
+  mutate(bin = as.factor(origin))
 
 
 # join and modify 
@@ -72,6 +72,11 @@ dat_tbl$data <- purrr::map(
     )
 )
 
+
+# figure colour palette
+size_main <- "#377eb8"
+origin_main <- "#4daf4a"
+stock_main <- "#984ea3"
 
 
 # BUILD MESHES -----------------------------------------------------------------
@@ -175,9 +180,9 @@ plot_map <- function(dat, column) {
 # FIT MODELS -------------------------------------------------------------------
 
 fit_size <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + size_bin + poly(slack_z, 2) +
+  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
-    slope_z + poly(week_z, 2):size_bin,
+    slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[1]],
   mesh = dat_tbl$mesh[[1]],
@@ -186,7 +191,7 @@ fit_size <- sdmTMB(
   # spatial_varying = ~ 0 + size_bin,
   time = "month",
   spatiotemporal = "rw",
-  groups = "size_bin",
+  groups = "bin",
   anisotropy = TRUE,
   share_range = FALSE,
   silent = FALSE
@@ -195,9 +200,9 @@ fit_size <- sdmTMB(
 # CONSIDER MORE COMPLEX MODEL (1 share range off, 2 slack/moon included) w/ more
 # stocks
 fit_stock <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + agg +# poly(slack_z, 2) +
+  catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
     depth_z +# poly(moon_z, 2) +
-    slope_z + poly(week_z, 2):agg,
+    slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[2]],
   mesh = dat_tbl$mesh[[2]],
@@ -205,16 +210,16 @@ fit_stock <- sdmTMB(
   spatial = "on",
   time = "month",
   spatiotemporal = "rw",
-  groups = "agg",
+  groups = "bin",
   anisotropy = TRUE,
   share_range = TRUE,
   silent = FALSE
 )
 
 fit_origin <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + origin +# poly(slack_z, 2) +
+  catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
     depth_z + #poly(moon_z, 2) +
-    slope_z + poly(week_z, 2):origin,
+    slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[3]],
   mesh = dat_tbl$mesh[[3]],
@@ -222,7 +227,7 @@ fit_origin <- sdmTMB(
   spatial = "on",
   time = "month",
   spatiotemporal = "rw",
-  groups = "origin",
+  groups = "bin",
   anisotropy = TRUE,
   share_range = FALSE,
   silent = FALSE
@@ -283,8 +288,19 @@ DHARMa::testResiduals(r_nb1_size)
 dat_tbl$fes <- purrr::map2(
   fit_list,
   dat_tbl$dataset,
-  ~ tidy(.x, effects = "fixed", conf.int = T) 
+  ~ tidy(.x, effects = "fixed", conf.int = T) %>% 
+    filter(!grepl("poly", term),
+           !(grepl("_z", term))) %>% 
+    mutate(
+      term = str_replace(term, "bin", "") %>% 
+        as.factor(),
+      exp_est = exp(estimate),
+      exp_lo = exp(conf.low),
+      exp_hi = exp(conf.high)
+    ) 
 )
+dat_tbl$fes[[3]] <- dat_tbl$fes[[3]] %>% 
+  mutate(term = fct_relevel(term, "unknown", after = Inf))
 dat_tbl$res <- purrr::map2(
   fit_list,
   dat_tbl$dataset,
@@ -293,21 +309,32 @@ dat_tbl$res <- purrr::map2(
 
 
 # intercept plots
-dd <- dat_tbl %>% 
+int_plots <- purrr::map2(
+  dat_tbl$fes,
+  list(size_main, stock_main, origin_main),
+  ~ ggplot(.x) + 
+    geom_pointrange(aes(x = term, y = exp_est, ymin = exp_lo, ymax = exp_hi),
+                    shape = 21, fill = .y) +
+    ggsidekick::theme_sleek() +
+    labs(y = "Mean Catch Rate") +
+    theme(
+      axis.title.x = element_blank(),
+      axis.text.x = element_text(angle=45, vjust=1, hjust=1)
+    )
+)
+
+# slope estimates (supp table)
+slope_dat <- dat_tbl %>% 
   dplyr::select(dataset, fes) %>% 
   unnest(cols = fes) %>% 
-  filter(!grepl("poly", term),
-         !(grepl("_z", term))) %>% 
-  ggplot()
-  glimpse()
+  filter(term %in% c("depth_z", "slope_z"))
+  
 
 
-
-# NOTE month and year values don't matter since random variables and integrated 
-# out
+# helper funcs
 pred_foo <- function(x = "week", nd, fit) {
   p <- predict(fit, newdata = nd, se_fit = FALSE, re_form = NA, 
-          re_form_iid = NA, nsim = 100)
+               re_form_iid = NA, nsim = 100)
   nd %>% 
     mutate(
       est = apply(p, 1, mean),
@@ -316,18 +343,90 @@ pred_foo <- function(x = "week", nd, fit) {
     )
 }
 
-nd_week <- expand.grid(
-  year_f = "2020", 
-  week_z = seq(-2, 2, length = 30),
-  month = 7, #unique(catch_size$month), 
-  slack_z = 0,
-  moon_z = 0,
-  size_bin = unique(dat_tbl$data[[1]]$size_bin),
-  depth_z = 0,
-  slope_z = 0
+plot_foo <- function(dat_in, var_in = "week", x_lab = "Week", 
+                     col_in = "darkgrey") {
+  var_in2 <- rlang::enquo(var_in)
+  dum <- dat_in %>% 
+    filter(variable == !!var_in2)
+  ggplot(
+    dum, 
+    aes(x = dum[[var_in]], y = scale_est, ymin = scale_up, ymax = scale_lo)
+  ) +
+    geom_line(colour = col_in) +
+    labs(x = x_lab, y = "Scaled Abundance") +
+    geom_ribbon(alpha = 0.3, fill = col_in) +
+    ggsidekick::theme_sleek() +
+    coord_cartesian(y = c(0.03, 3)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = c(0, 0)) 
+}
+
+
+dat_tbl$week_preds <- purrr::map2(
+  dat_tbl$data,
+  fit_list,
+  function (x, y) {
+    dum <- expand.grid(
+      year_f = "2020",
+      week_z = seq(-2, 2, length = 30),
+      month = 7,
+      slack_z = 0,
+      moon_z = 0,
+      bin = unique(x$bin),
+      depth_z = 0,
+      slope_z = 0
+    ) 
+    
+    pred_foo(x = "week", nd = dum, fit = y) %>% 
+      group_by(bin) %>% 
+      mutate(
+        week = (week_z * sd(x$week)) + mean(x$week),
+        exp_est = exp(est),
+        max_est = max(exp_est),
+        scale_est = exp_est / max_est,
+        up = (est + (stats::qnorm(0.975) * est_se)),
+        lo = (est + (stats::qnorm(0.025) * est_se)),
+        exp_up = exp(up),
+        exp_lo = exp(lo),
+        scale_up = exp(up) / max_est,
+        scale_lo = exp(lo) / max_est
+      )
+  }
 )
 
-p_week <- pred_foo(x = "week", nd = nd_week, fit = fit)
+
+week_plots <- purrr::map2(
+  dat_tbl$week_preds,
+  list(size_main, stock_main, origin_main),
+  ~ plot_foo(dat_in = .x, var_in = "week", x_lab = "Week", col_in = .y) +
+    facet_wrap(~bin) +
+    theme(
+      legend.position = "none"
+    )
+) 
+
+
+png(here::here("figs", "ms_figs", "size_week_fe.png"), res = 250, units = "in", 
+    height = 4.5, width = 7.5)
+cowplot::plot_grid(
+  int_plots[[1]], week_plots[[1]], ncol = 2, rel_widths = c(0.55, 1)
+)
+dev.off()
+
+png(here::here("figs", "ms_figs", "stock_week_fe.png"), res = 250, units = "in", 
+    height = 4.5, width = 7.5)
+cowplot::plot_grid(
+  int_plots[[2]], week_plots[[2]], ncol = 2, rel_widths = c(0.55, 1)
+)
+dev.off()
+
+png(here::here("figs", "ms_figs", "origin_week_fe.png"), res = 250, units = "in", 
+    height = 4.5, width = 7.5)
+cowplot::plot_grid(
+  int_plots[[3]], week_plots[[3]], ncol = 2, rel_widths = c(0.55, 1)
+)
+dev.off()
+
 
 
 # fixed depth effects
@@ -395,25 +494,7 @@ full_p <- list(p_week, p_depth, p_slope, p_slack, p_moon) %>%
     scale_lo = exp(lo) / max_est
   ) 
 
-# plots
-plot_foo <- function(var_in = "week", x_lab = "Week") {
-  var_in2 <- rlang::enquo(var_in)
-  dum <- full_p %>% 
-    filter(variable == !!var_in2)
-  ggplot(
-    dum, 
-    aes(x = dum[[var_in]], y = scale_est, ymin = scale_up, 
-        ymax = scale_lo)
-  ) +
-    geom_line() +
-    labs(x = x_lab) +
-    geom_ribbon(alpha = 0.4) +
-    ggsidekick::theme_sleek() +
-    coord_cartesian(y = c(0.03, 3)) +
-    scale_x_continuous(expand = c(0, 0)) +
-    scale_y_continuous(expand = c(0, 0)) +
-    theme(axis.title.y = element_blank())
-}
+
 
 week_plot <- plot_foo(var_in = "week", x_lab = "Week") +
   facet_wrap(~size_bin) +
