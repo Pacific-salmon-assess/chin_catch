@@ -48,20 +48,20 @@ coast_trim <- sf::st_crop(
 bath_grid <- readRDS(here::here("data", "pred_bathy_grid_1000m.RDS")) %>% 
   mutate(id = row_number(),
          shore_dist_km = shore_dist / 1000) %>% 
-  filter(X < max(set_dat$xUTM - 500),
-         X > min(set_dat$xUTM + 1000),
-         Y < max(set_dat$yUTM - 500),
-         Y > min(set_dat$yUTM + 500))
+  filter(X < max(sets$xUTM - 500),
+         X > min(sets$xUTM + 500),
+         Y < max(sets$yUTM + 500),
+         Y > min(sets$yUTM - 500))
 
 crit_hab <- sf::st_read(
   here::here("data", "critical_habitat_trim", 
              "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016_shrunk.shp")) %>% 
   sf::st_transform(., crs = sf::st_crs("+proj=utm +zone=10 +units=m")) %>% 
   sf::st_crop(., 
-              xmin = min(set_dat$xUTM + 1000), 
-              ymin = max(set_dat$yUTM - 500), 
-              xmax = max(set_dat$xUTM - 500), 
-              ymax = min(set_dat$yUTM + 500))
+              xmin = min(sets$xUTM + 500), 
+              ymin = min(sets$yUTM - 500), 
+              xmax = max(sets$xUTM - 500), 
+              ymax = max(sets$yUTM + 500))
 
 
 main_map <- base_map +
@@ -79,11 +79,14 @@ slope_map <- base_map +
   theme(legend.position = "right",
         axis.text = element_blank())
 
+crit_hab_lat <- crit_hab %>% 
+  sf::st_transform(., crs = sf::st_crs(crop_coast))
 
 sets_only <- ggplot() +
   geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
   geom_point(data = sets, aes(x = lon, y = lat, fill = as.factor(year)),
              inherit.aes = FALSE, alpha = 0.4, shape = 21) +
+  geom_sf(data = crit_hab, colour = "red", fill = "transparent", lty = 2) +
   ggsidekick::theme_sleek() +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) +

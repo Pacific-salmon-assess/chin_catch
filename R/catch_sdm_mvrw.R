@@ -96,74 +96,62 @@ dat_tbl$mesh <- purrr::map(
 pred_bathy_grid <- readRDS(
   here::here("data", "pred_bathy_grid_1000m.RDS"))
 trim_grid <- pred_bathy_grid %>% 
-  filter(X < max(catch_size$xUTM + 1000) & X > min(catch_size$xUTM - 1000),
-         Y < max(catch_size$yUTM + 1000) & Y > min(catch_size$yUTM - 1000))
+  filter(X < max(catch_size$xUTM + 1500) & X > min(catch_size$xUTM - 1500),
+         Y < max(catch_size$yUTM + 1500) & Y > min(catch_size$yUTM - 1500))
 
-pred_dat_size <- expand.grid(
-  week = c(18.5, 23, 27.5, 32, 36.5),
-  year_f = dat_tbl$data[[1]]$year_f[[1]], # year shouldn't matter since RI
-  size_bin = unique(dat_tbl$data[[1]]$size_bin)
-) 
-pred_list_size <- vector(mode = "list", length = nrow(pred_dat_size))
-for (i in seq_along(pred_list_size)) {
-  pred_list_size[[i]] <- trim_grid %>% 
-    mutate(week = pred_dat_size$week[i],
-           year_f = pred_dat_size$year_f[i],
-           size_bin = pred_dat_size$size_bin[i])
-}
-
-pred_dat_stock <- expand.grid(
-  week = c(18.5, 23, 27.5, 32, 36.5),
-  year_f = dat_tbl$data[[1]]$year_f[[1]], # year shouldn't matter since RI
-  agg = unique(dat_tbl$data[[2]]$agg)
-) 
-pred_list_stock <- vector(mode = "list", length = nrow(pred_dat_stock))
-for (i in seq_along(pred_list_stock)) {
-  pred_list_stock[[i]] <- trim_grid %>% 
-    mutate(week = pred_dat_stock$week[i],
-           year_f = pred_dat_stock$year_f[i],
-           agg = pred_dat_stock$agg[i])
-}
-
-pred_dat_origin <- expand.grid(
-  week = c(18.5, 23, 27.5, 32, 36.5),
-  year_f = dat_tbl$data[[1]]$year_f[[1]], # year shouldn't matter since RI
-  origin = unique(dat_tbl$data[[3]]$origin)
-) 
-pred_list_origin <- vector(mode = "list", length = nrow(pred_dat_origin))
-for (i in seq_along(pred_list_origin)) {
-  pred_list_origin[[i]] <- trim_grid %>% 
-    mutate(week = pred_dat_origin$week[i],
-           year_f = pred_dat_origin$year_f[i],
-           origin <- pred_dat_origin$origin[i])
-}
 
 # clean lists above
-dat_tbl$pred_data <- purrr::map2(
-  list(pred_list_size, pred_list_stock, pred_list_origin),
+dat_tbl$pred_data <- purrr::map(
   dat_tbl$data,
-  ~ .x %>% 
-    bind_rows() %>% 
-    mutate(
-      xUTM_ds = X / 1000,
-      yUTM_ds = Y / 1000,
-      slack_z = 0,
-      moon_z = 0,
-      month = case_when(
-        week < 23 ~ 5,
-        week >= 23 & week < 27 ~ 6,
-        week >= 27 & week < 32 ~ 7,
-        week >= 32 & week < 35 ~ 8,
-        week >= 35 ~ 9
-      ),
-      month_f = as.factor(month),
-      week_z = (week - mean(.y$week)) / sd(.y$week),
-      depth_z = (depth - mean(.y$mean_depth)) / sd(.y$mean_depth),
-      slope_z = (slope - mean(.y$mean_slope)) / sd(.y$mean_slope)
+  function (x) {
+    pred_dat <- expand.grid(
+      week = c(18.5, 23, 27.5, 32, 36.5),
+      year_f = x$year_f[[1]], # year shouldn't matter since RI
+      bin = unique(x$bin)
     ) 
+    pred_list <- vector(mode = "list", length = nrow(pred_dat))
+    for (i in seq_along(pred_list)) {
+      pred_list[[i]] <- trim_grid %>% 
+        mutate(week = pred_dat$week[i],
+               year_f = pred_dat$year_f[i],
+               bin = pred_dat$bin[i])
+    }
+    
+    pred_list %>% 
+      bind_rows() %>% 
+      mutate(
+        xUTM_ds = X / 1000,
+        yUTM_ds = Y / 1000,
+        slack_z = 0,
+        moon_z = 0,
+        month = case_when(
+          week < 23 ~ 5,
+          week >= 23 & week < 27 ~ 6,
+          week >= 27 & week < 32 ~ 7,
+          week >= 32 & week < 35 ~ 8,
+          week >= 35 ~ 9
+        ),
+        month_f = as.factor(month),
+        week_z = (week - mean(x$week)) / sd(x$week),
+        depth_z = (depth - mean(x$mean_depth)) / sd(x$mean_depth),
+        slope_z = (slope - mean(x$mean_slope)) / sd(x$mean_slope)
+      ) 
+  }
 )
 
-# helper function for simple predictive maps
+# key to assign weeks dates
+week_key <- data.frame(
+  week = unique(dat_tbl$pred_data[[1]]$week)
+) %>% 
+  mutate(
+    date = c("May 1", "June 5", "July 10", "Aug 15", "Sep 10") %>% 
+      as.factor() %>% 
+      fct_reorder(., week)
+  )
+
+
+# HELPER FUNCTIONS -------------------------------------------------------------
+
 plot_map <- function(dat, column) {
   ggplot() +
     geom_raster(data = dat, aes(X, Y, fill = {{ column }})) +
@@ -175,6 +163,34 @@ plot_map <- function(dat, column) {
     )
 }
 
+pred_foo <- function(x = "week", nd, fit) {
+  p <- predict(fit, newdata = nd, se_fit = FALSE, re_form = NA, 
+               re_form_iid = NA, nsim = 100)
+  nd %>% 
+    mutate(
+      est = apply(p, 1, mean),
+      est_se = apply(p, 1, sd),
+      variable = x
+    )
+}
+
+plot_foo <- function(dat_in, var_in = "week", x_lab = "Week", 
+                     col_in = "darkgrey") {
+  var_in2 <- rlang::enquo(var_in)
+  dum <- dat_in %>% 
+    filter(variable == !!var_in2)
+  ggplot(
+    dum, 
+    aes(x = dum[[var_in]], y = scale_est, ymin = scale_up, ymax = scale_lo)
+  ) +
+    geom_line(colour = col_in) +
+    labs(x = x_lab, y = "Scaled Abundance") +
+    geom_ribbon(alpha = 0.3, fill = col_in) +
+    ggsidekick::theme_sleek() +
+    coord_cartesian(y = c(0.03, 3)) +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = c(0, 0)) 
+}
 
 
 # FIT MODELS -------------------------------------------------------------------
@@ -249,9 +265,15 @@ fit_list <- list(fit_size, fit_stock, fit_origin)
 
 ## TODO: check all groups
 
-sims_nb1 <- simulate(fit, nsim = 100, newdata = catch_size)
-sims_nb1 %>% 
-  dharma_residuals(fit)
+qq_list <- purrr::map2(
+  fit_list,
+  dat_tbl$data,
+  function(x, y) {
+    simulate(x, nsim = 100, newdata = y) %>% 
+      dharma_residuals(x)
+  }
+)
+
 
 
 # sample from posterior using MCMC to avoid Laplace approximation
@@ -324,42 +346,15 @@ int_plots <- purrr::map2(
 )
 
 # slope estimates (supp table)
-slope_dat <- dat_tbl %>% 
-  dplyr::select(dataset, fes) %>% 
-  unnest(cols = fes) %>% 
-  filter(term %in% c("depth_z", "slope_z"))
+purrr::map2(
+  fit_list,
+  dat_tbl$dataset,
+  ~ tidy(.x, effects = "fixed", conf.int = T) %>% 
+    filter(term %in% c("depth_z", "slope_z")) %>% 
+    mutate(dataset = .y)
+) %>% 
+  bind_rows()
   
-
-
-# helper funcs
-pred_foo <- function(x = "week", nd, fit) {
-  p <- predict(fit, newdata = nd, se_fit = FALSE, re_form = NA, 
-               re_form_iid = NA, nsim = 100)
-  nd %>% 
-    mutate(
-      est = apply(p, 1, mean),
-      est_se = apply(p, 1, sd),
-      variable = x
-    )
-}
-
-plot_foo <- function(dat_in, var_in = "week", x_lab = "Week", 
-                     col_in = "darkgrey") {
-  var_in2 <- rlang::enquo(var_in)
-  dum <- dat_in %>% 
-    filter(variable == !!var_in2)
-  ggplot(
-    dum, 
-    aes(x = dum[[var_in]], y = scale_est, ymin = scale_up, ymax = scale_lo)
-  ) +
-    geom_line(colour = col_in) +
-    labs(x = x_lab, y = "Scaled Abundance") +
-    geom_ribbon(alpha = 0.3, fill = col_in) +
-    ggsidekick::theme_sleek() +
-    coord_cartesian(y = c(0.03, 3)) +
-    scale_x_continuous(expand = c(0, 0)) +
-    scale_y_continuous(expand = c(0, 0)) 
-}
 
 
 dat_tbl$week_preds <- purrr::map2(
@@ -429,21 +424,18 @@ dev.off()
 
 
 
-# fixed depth effects
+# fixed depth effects (only for size model since similar with others)
 nd_depth <- expand.grid(
-  year_f = unique(catch_size$year_f),
+  year_f = unique(dat_tbl$data[[1]]$year_f)[[1]],
   week_z = 0,
-  month = unique(catch_size$month),
+  month = 7, 
   slack_z = 0,
   moon_z = 0,
-  size_bin = unique(catch_size$size_bin),
+  bin = "medium",
   depth_z = seq(-2, 2, length = 30),
   slope_z = 0
-) %>% 
-  filter(size_bin == "medium", year_f == "2020", month == "7")
-
-p_depth <- pred_foo(x = "depth", nd = nd_depth, fit = fit)
-
+) 
+p_depth <- pred_foo(x = "depth", nd = nd_depth, fit = fit_size)
 
 # fixed slope effects
 nd_slope <- nd_depth %>% 
@@ -451,8 +443,7 @@ nd_slope <- nd_depth %>%
     slope_z = seq(-2, 2, length = 30),
     depth_z = 0
   )
-p_slope <- pred_foo(x = "slope", nd = nd_slope, fit = fit)
-
+p_slope <- pred_foo(x = "slope", nd = nd_slope, fit = fit_size)
 
 # fixed slack effects
 nd_slack <- nd_depth %>% 
@@ -460,8 +451,7 @@ nd_slack <- nd_depth %>%
     slack_z = seq(-3, 3, length = 30),
     depth_z = 0
   )
-p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit)
-
+p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit_size)
 
 # fixed lunar effects
 nd_moon <- nd_depth %>% 
@@ -469,14 +459,13 @@ nd_moon <- nd_depth %>%
     moon_z = seq(-1.8, 1.22, length = 30),
     depth_z = 0
   )
-p_moon <- pred_foo(x = "moon", nd = nd_moon, fit = fit)
+p_moon <- pred_foo(x = "moon", nd = nd_moon, fit = fit_size)
 
 
-full_p <- list(p_week, p_depth, p_slope, p_slack, p_moon) %>% 
+full_p <- list(p_depth, p_slope, p_slack, p_moon) %>% 
   do.call(rbind, .) %>%
-  group_by(size_bin, variable) %>% 
+  group_by(variable) %>% 
   mutate(
-    week = (week_z * sd(catch_size$week)) + mean(catch_size$week),
     depth = (depth_z * sd(catch_size$mean_depth)) + mean(catch_size$mean_depth),
     slope = (slope_z * sd(catch_size$mean_slope)) + mean(catch_size$mean_slope),
     slack = (slack_z * sd(catch_size$hours_from_slack)) +
@@ -495,28 +484,27 @@ full_p <- list(p_week, p_depth, p_slope, p_slack, p_moon) %>%
   ) 
 
 
-
-week_plot <- plot_foo(var_in = "week", x_lab = "Week") +
-  facet_wrap(~size_bin) +
-  theme(axis.title.y = element_text(angle = 90)) +
-  ylab("Scaled Abundance")
-depth_plot <- plot_foo(var_in = "depth", x_lab = "Bottom Depth (m)")
-slope_plot <- plot_foo(var_in = "slope", x_lab = "Bottom Slope (degrees)")
-slack_plot <- plot_foo(var_in = "slack", x_lab = "Hours From Slack")
-moon_plot <- plot_foo(var_in = "moon", 
-                      x_lab = "Proportion Moon Illuminated")
+depth_plot <- plot_foo(dat_in  = full_p, var_in = "depth", 
+                       x_lab = "Bottom Depth (m)", col_in = size_main) +
+  theme(axis.title.y = element_blank())
+slope_plot <- plot_foo(dat_in  = full_p, var_in = "slope", 
+                       x_lab = "Bottom Slope (degrees)", col_in = size_main) +
+  theme(axis.title.y = element_blank())
+slack_plot <- plot_foo(dat_in  = full_p, var_in = "slack", 
+                       x_lab = "Hours From Slack", col_in = size_main) +
+  theme(axis.title.y = element_blank())
+moon_plot <- plot_foo(dat_in  = full_p, var_in = "moon", 
+                      x_lab = "Proportion Moon Illuminated",
+                      col_in = size_main) +
+  theme(axis.title.y = element_blank())
 
 p1 <- cowplot::plot_grid(
   depth_plot, slope_plot, slack_plot, moon_plot,
   ncol = 2
 )
 
-png(here::here("figs", "ms_figs", "week_fe.png"), res = 250, units = "in", 
-    height = 5.5, width = 5.5)
-week_plot
-dev.off()
 
-png(here::here("figs", "ms_figs", "other_fes.png"), res = 250, units = "in", 
+png(here::here("figs", "ms_figs", "size_other_fes.png"), res = 250, units = "in", 
     height = 5.5, width = 5.5)
 gridExtra::grid.arrange(
   gridExtra::arrangeGrob(
@@ -529,58 +517,102 @@ dev.off()
 
 ## SPATIAL PREDICTIONS ---------------------------------------------------------
 
-upsilon_pred <- predict(fit,
-                        newdata = pred_grid,
-                        return_tmb_report = TRUE)
 
-pp <- predict(fit, newdata = pred_grid, se_fit = FALSE, re_form = NULL)
-# for now remove extra rows but check w/ Sean
-pp$upsilon_stc <- as.numeric(upsilon_pred$proj_upsilon_st_A_vec)[1:nrow(pp)]
+spatial_preds <- purrr::map2(
+  fit_list,
+  dat_tbl$pred_data,
+  function (x, y) {
+    upsilon_pred <- predict(x,
+                            newdata = y,
+                            return_tmb_report = TRUE)
+    pp <- predict(x, newdata = y, se_fit = FALSE, re_form = NULL, 
+                  re_form_iid = NA)
+    pp$upsilon_stc <- as.numeric(upsilon_pred$proj_upsilon_st_A_vec)
+    return(pp)
+  }
+)
 
-week_key <- data.frame(
-  week = unique(pred_grid$week)
-) %>% 
-  mutate(
-    date = c("May 1", "June 5", "July 10", "Aug 15", "Sep 10") %>% 
-      as.factor() %>% 
-      fct_reorder(., week)
+
+omegas <- purrr::map(
+  spatial_preds,
+  ~ .x %>%
+    dplyr::select(-c(bin, week, month)) %>%
+    distinct() %>% 
+    plot_map(., omega_s) +
+    scale_fill_gradient2(name = "Spatial\nRF Effect") +
+    theme(legend.position = "top") 
+)
+
+epsilons <- purrr::map(
+  spatial_preds,
+  ~ .x %>% 
+    plot_map(., upsilon_stc) +
+    scale_fill_gradient2(name = "Spatial\nRF Effect") +
+    facet_grid(month~bin) +
+    theme(legend.position = "top") 
   )
-  
 
-size_omega <- pp %>%
-  dplyr::select(-c(size_bin, week, month)) %>%
-  distinct() %>% 
-  plot_map(., omega_s) +
-  scale_fill_gradient2(name = "Spatial\nRF Effect") +
-  theme(legend.position = "top")
-
-month_omega <- pp %>%
-  plot_map(., upsilon_stc) +
-  scale_fill_gradient2(name = "Spatial\nRF Effect") +
-  facet_grid(size_bin~month) +
-  theme(legend.position = "top")
-
-full_preds <- pp %>% 
-  group_by(size_bin) %>% 
-  mutate(scale_est = exp(est) / max(exp(est))) %>%
-  left_join(., week_key, by = "week") %>% 
-  plot_map(., scale_est) +
-  scale_fill_viridis_c(trans = "sqrt", name = "Scaled\nAbundance") +
-  facet_grid(date~size_bin)
+full_preds <- purrr::map(
+  spatial_preds,
+  ~ .x %>%  
+    group_by(bin) %>% 
+    mutate(scale_est = exp(est) / max(exp(est))) %>%
+    left_join(., week_key, by = "week") %>% 
+    plot_map(., scale_est) +
+    scale_fill_viridis_c(trans = "sqrt", name = "Scaled\nAbundance") +
+    facet_grid(date~bin)  +
+    theme(legend.position = "top",
+          legend.key.size = unit(.85, 'cm')) 
+)
 
 
-png(here::here("figs", "ms_figs", "month_omega.png"), res = 250, units = "in", 
-    height = 4.5, width = 4.5)
-month_omega
-dev.off()
-
+# size figs
 png(here::here("figs", "ms_figs", "size_omega.png"), res = 250, units = "in", 
-    height = 7.5, width = 7.5)
-size_omega
+    height = 4, width = 4)
+omegas[[1]]
 dev.off()
 
-png(here::here("figs", "ms_figs", "spatial_preds.png"), res = 250, units = "in", 
+png(here::here("figs", "ms_figs", "size_epsilon.png"), res = 250, units = "in", 
     height = 7.5, width = 7.5)
-full_preds
+epsilons[[1]]
+dev.off()
+
+png(here::here("figs", "ms_figs", "size_spatial_preds.png"), res = 250,
+    units = "in", height = 7.5, width = 7.5)
+full_preds[[1]]
+dev.off()
+
+
+# stock figs
+png(here::here("figs", "ms_figs", "stock_omega.png"), res = 250, units = "in", 
+    height = 4, width = 4)
+omegas[[2]]
+dev.off()
+
+png(here::here("figs", "ms_figs", "stock_epsilon.png"), res = 250, units = "in", 
+    height = 7.5, width = 7.5)
+epsilons[[2]]
+dev.off()
+
+png(here::here("figs", "ms_figs", "stock_spatial_preds.png"), res = 250,
+    units = "in", height = 7.5, width = 7.5)
+full_preds[[2]]
+dev.off()
+
+
+# origin figs
+png(here::here("figs", "ms_figs", "origin_omega.png"), res = 250, units = "in", 
+    height = 4, width = 4)
+omegas[[3]]
+dev.off()
+
+png(here::here("figs", "ms_figs", "origin_epsilon.png"), res = 250, units = "in", 
+    height = 7.5, width = 7.5)
+epsilons[[3]]
+dev.off()
+
+png(here::here("figs", "ms_figs", "origin_spatial_preds.png"), res = 250,
+    units = "in", height = 7.5, width = 7.5)
+full_preds[[3]]
 dev.off()
 
