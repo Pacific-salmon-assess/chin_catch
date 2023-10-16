@@ -95,21 +95,29 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
       fl >= 65 & fl < 75 ~ "medium",
       fl >= 75 ~ "large"
     ),
-    agg_name = fct_relevel(
-      agg_name, "WCVI", "ECVI", "Fraser Year.", "Fraser Sub.", "PugetSo",
-      "Low Col.", "Up Col.", "WA_OR", "Cali"
+    agg_name = factor(
+      agg_name, levels = c(
+        "WCVI", "ECVI", "Fraser Year.", "Fraser Sub.", "PugetSo",
+        "Low Col.", "Up Col.", "WA_OR", "Cali"
+      ), 
+      labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
+                 "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
+                 "Cali")
     ),
     origin = fct_relevel(
       origin, "hatchery", "wild", "unknown"
     ),
     stage = fct_relevel(
       stage, "mature", "immature"
-    )
+    )#,
+    # agg = factor(agg_name, 
+    #              labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
+    #                         "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
+    #                         "Cali"))
   ) %>% 
   dplyr::select(
     fish, vemco_code, event, date, year, month, year_day, deployment_time,
-    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, 
-    agg = agg_name
+    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg = agg_name
   ) %>% 
   # remove 2023 data until GSI available
   filter(!year == "2023")
@@ -371,19 +379,19 @@ dev.off()
  
 
 ## lipid content and fork length
-lipid_fl <- ggplot(chin %>% filter(!is.na(lipid), !is.na(agg_name))) +
+lipid_fl <- ggplot(chin %>% filter(!is.na(lipid), !is.na(agg))) +
   geom_point(aes(x = fl, y = lipid, fill = stage), shape = 21, alpha = 0.6) +
   scale_fill_viridis_d(option = "B", guide = "none") +
   ggsidekick::theme_sleek() +
-  facet_wrap(~agg_name) +
+  facet_wrap(~agg) +
   labs(x = "Fork Length", y = "Lipid Content") +
   theme(legend.position = "top", legend.title = element_blank())
 
 
 ## size and lipid boxplots 
 fl_bp <- chin %>%
-  filter(!is.na(agg_name)) %>%
-  ggplot(., aes(x = agg_name, y = fl, fill = stage)) +
+  filter(!is.na(agg)) %>%
+  ggplot(., aes(x = agg, y = fl, fill = stage)) +
   geom_boxplot() +
   scale_fill_viridis_d(guide = "none") +
   labs(y = "Fork Length") +
@@ -394,9 +402,9 @@ fl_bp <- chin %>%
   )
 
 lipid_bp <- chin %>%
-  filter(!is.na(agg_name),
+  filter(!is.na(agg),
          !is.na(lipid)) %>%
-  ggplot(., aes(x = agg_name, y = lipid, fill = stage)) +
+  ggplot(., aes(x = agg, y = lipid, fill = stage)) +
   geom_boxplot() +
   scale_fill_viridis_d(guide = "none") +
   labs(y = "Lipid Content") +
@@ -427,29 +435,29 @@ library(mgcv)
 ## fit
 chin_fl <- chin %>% 
   filter(!is.na(fl),
-         !is.na(agg_name))
+         !is.na(agg))
 
 fit_fl <- gam(
   fl ~ s(year_day, bs = "tp", m = 2, k = 4) + 
     s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
-    s(year_day, by = agg_name, bs = "tp", m = 1, k = 4) +  
-    s(agg_name, bs = "re") + s(year, bs = "re"),
+    s(year_day, by = agg, bs = "tp", m = 1, k = 4) +  
+    s(agg, bs = "re") + s(year, bs = "re"),
   data = chin_fl,
   method = "REML"
 )
 
 chin_lipid <- chin %>% 
   filter(!is.na(lipid),
-         !is.na(agg_name))
+         !is.na(agg))
 
 fit_lipid <- gam(
   lipid ~ s(fl, bs = "tp", m = 2, k = 4) + 
-    s(fl, by = agg_name, bs = "tp", m = 1, k = 4) +  
+    s(fl, by = agg, bs = "tp", m = 1, k = 4) +  
     s(year_day, bs = "tp", m = 2, k = 4) + 
     s(year_day, by = stage, bs = "tp", m = 1, k = 4) +
     stage + origin + 
-    s(year_day, by = agg_name, bs = "tp", m = 1, k = 4) +  
-    s(agg_name, bs = "re") + s(year, bs = "re"),
+    s(year_day, by = agg, bs = "tp", m = 1, k = 4) +  
+    s(agg, bs = "re") + s(year, bs = "re"),
   data = chin_lipid,
   method = "REML",
   family = Gamma(link = "log")
@@ -523,11 +531,11 @@ dev.off()
 ## predictions
 
 # fl-stage 
-fl_stage <- chin %>% 
-  group_by(stage) %>% 
+fl_mature <- chin %>% 
+  filter(stage == "mature") %>% 
   summarize(
     fl = mean(fl, na.rm = T)
-  )
+  ) 
 
 # yday preds
 new_yday <- expand.grid(
@@ -535,7 +543,7 @@ new_yday <- expand.grid(
   stage = unique(chin$stage),
   origin = unique(chin$origin),
   # since predicting only on fixed effects factor levels don't matter
-  agg_name = "ECVI",
+  agg = "ECVI",
   year = "2022"
 ) %>% 
   left_join(., fl_stage, by = "stage") 
@@ -634,7 +642,7 @@ new_fl <- expand.grid(
   stage = unique(chin$stage),
   origin = unique(chin$origin),#unique(chin$origin),
   # since predicting only on fixed effects factor levels don't matter
-  agg_name = "ECVI",
+  agg = "ECVI",
   year = "2022",
   year_day = mean(chin$year_day)
 ) 
@@ -671,4 +679,80 @@ fl_lipid <- ggplot(new_dat2 %>% filter(stage == "mature", origin == "hatchery"))
 png(here::here("figs", "ms_figs", "fl_smooths.png"), res = 250, units = "in",
     height = 4.25, width = 4.25)
 fl_lipid
+dev.off()
+
+
+# stock preds
+# fl-agg key for fitting lipid model 
+fl_agg <- chin %>% 
+  filter(stage == "mature") %>% 
+  summarize(
+    fl = mean(fl, na.rm = T)
+  ) %>% 
+  pull(fl)
+new_stock <- expand.grid(
+  year_day = mean(chin$year_day),
+  stage = unique(chin$stage),
+  origin = unique(chin$origin),
+  # since predicting only on fixed effects factor levels don't matter
+  agg = unique(chin$agg),
+  year = "2022",
+  fl = fl_agg
+) %>% 
+  filter(stage == "mature", origin == "hatchery", !is.na(agg)) 
+
+
+fl_preds_agg <- predict(
+  fit_fl, newdata = new_stock, se.fit = TRUE,
+  exclude = "s(year)"
+)
+lipid_preds_agg <- predict(
+  fit_lipid, newdata = new_stock, se.fit = TRUE, type = "response",
+  exclude = "s(year)"
+  )
+
+
+new_dat3 <- new_stock %>% 
+  mutate(
+    pred_fl = as.numeric(fl_preds_agg$fit),
+    lo_fl = pred_fl + (stats::qnorm(0.025) * 
+                               as.numeric(fl_preds_agg$se.fit)), 
+    up_fl = pred_fl + (stats::qnorm(0.975) * 
+                               as.numeric(fl_preds_agg$se.fit)),
+    pred_lipid = as.numeric(lipid_preds_agg$fit),
+    lo_lipid = pred_lipid + (stats::qnorm(0.025) * 
+                               as.numeric(lipid_preds_agg$se.fit)), 
+    up_lipid = pred_lipid + (stats::qnorm(0.975) * 
+                               as.numeric(lipid_preds_agg$se.fit))
+  )
+
+fl_agg <- ggplot(new_dat3) +
+  geom_pointrange(
+    aes(x = agg, y = pred_fl, ymin = lo_fl, ymax = up_fl, fill = agg),
+    shape = 21
+  ) +
+  scale_fill_viridis_d(guide = "none") +
+  labs(y = "Predicted Fork Length") +
+  ggsidekick::theme_sleek() +
+  theme(
+    axis.title.x = element_blank()
+  )
+
+lipid_agg <- ggplot(new_dat3) +
+  geom_pointrange(
+    aes(x = agg, y = pred_lipid, ymin = lo_lipid, ymax = up_lipid, fill = agg),
+    shape = 21
+  ) +
+  scale_fill_viridis_d(guide = "none") +
+  labs(y = "Predicted Lipid Content") +
+  ggsidekick::theme_sleek() +
+  theme(
+    axis.title.x = element_blank()
+  )
+
+png(here::here("figs", "ms_figs", "agg_cond_ests.png"), res = 250, units = "in",
+    height = 4.25, width = 4.25)
+cowplot::plot_grid(
+  fl_agg, lipid_agg, ncol = 1
+)
 dev.off()
