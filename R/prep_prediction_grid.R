@@ -11,8 +11,7 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 
 
-chin <- readRDS(here::here("data", "clean_catch.RDS")) %>% 
-  rename(agg = agg_name)
+chin <- readRDS(here::here("data", "clean_catch.RDS"))
 
 # shapefiles for IPES survey grid and combined WCVI/IPES grid
 # ipes_grid_raw <- raster::shapefile(
@@ -21,8 +20,10 @@ chin <- readRDS(here::here("data", "clean_catch.RDS")) %>%
 # ipes_grid_trim <- subset(ipes_grid_raw, LAT > 48.25 & LAT < 49.1) 
 
 crit_hab <- raster::shapefile(
-  here::here("data", "critical_habitat_trim", 
-             "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016_shrunk.shp")) %>% 
+  here::here("data", "critical_habitat_trim2", 
+             "pred_grid_utm_zone10_noBarkley_v2.shp")) %>% 
+  # here::here("data", "critical_habitat_trim", 
+  #            "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016_shrunk.shp")) %>% 
   sp::spTransform(., CRS("+proj=utm +zone=10 +units=m"))
 
 

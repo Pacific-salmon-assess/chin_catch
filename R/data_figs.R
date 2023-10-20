@@ -100,10 +100,10 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
       agg_name, levels = c(
         "WCVI", "ECVI", "Fraser Year.", "Fraser Sub.", "Puget Sound",
         "Low Col.", "Up Col.", "WA_OR", "Cali"
-      ), 
-      labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
-                 "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
-                 "Cali")
+      )#, 
+      # labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
+      #            "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
+      #            "Cali")
     ),
     origin = fct_relevel(
       origin, "hatchery", "wild", "unknown"
@@ -721,7 +721,12 @@ new_stock <- expand.grid(
   fl = mean_fl
 ) %>% 
   filter(stage == "mature", origin == "hatchery", !is.na(agg)) 
-
+new_stock$agg <- factor(
+  new_stock$agg,
+  labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
+             "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
+             "Cali")
+)
 
 fl_preds_agg <- predict(
   fit_fl, newdata = new_stock, se.fit = TRUE,

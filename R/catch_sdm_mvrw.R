@@ -213,6 +213,7 @@ fit_size <- sdmTMB(
   silent = FALSE
 )
 
+
 # CONSIDER MORE COMPLEX MODEL (1 share range off, 2 slack/moon included) w/ more
 # stocks
 fit_stock <- sdmTMB(
@@ -231,6 +232,7 @@ fit_stock <- sdmTMB(
   share_range = TRUE,
   silent = FALSE
 )
+
 
 fit_origin <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
