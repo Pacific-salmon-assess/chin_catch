@@ -80,6 +80,7 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
       cu %in% c("MFR-summer", "NTh-sum", "STh-1.3", "LTh") ~ "Fraser Year.",
       agg == "Fraser" ~ "Fraser Sub.",
       agg == "Col" ~ "Up Col.",
+      agg == "PugetSo" ~ "Puget Sound",
       TRUE ~ agg
     ),
     # mu = case_when(
@@ -97,7 +98,7 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
     ),
     agg_name = factor(
       agg_name, levels = c(
-        "WCVI", "ECVI", "Fraser Year.", "Fraser Sub.", "PugetSo",
+        "WCVI", "ECVI", "Fraser Year.", "Fraser Sub.", "Puget Sound",
         "Low Col.", "Up Col.", "WA_OR", "Cali"
       ), 
       labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
@@ -221,6 +222,27 @@ catch_origin <- expand.grid(
 
 saveRDS(catch_origin, here::here("data", "catch_origin_pre.rds"))
 
+
+# SUPP TABLE OF STOCK BREAKDOWN ------------------------------------------------
+
+stock_table <- chin %>% 
+  filter(!is.na(stock)) %>% 
+  arrange(agg, cu, stock) %>% 
+  select(stock_aggregate = agg, conservation_unit = cu, stock) %>% 
+  mutate(
+    stock_aggregate = stock_aggregate %>% 
+      str_replace_all(., "\n", " "),
+    stock = stock %>% 
+      str_replace_all(., "_", " ") %>% 
+      str_to_title()
+  ) %>% 
+  distinct()
+
+write.csv(
+  stock_table,
+  here::here("data", "supp_stock_table.csv"),
+  row.names = FALSE
+)
 
 
 # STOCK COMPOSITION ------------------------------------------------------------
@@ -683,8 +705,7 @@ dev.off()
 
 
 # stock preds
-# fl-agg key for fitting lipid model 
-fl_agg <- chin %>% 
+mean_fl <- chin %>% 
   filter(stage == "mature") %>% 
   summarize(
     fl = mean(fl, na.rm = T)
@@ -697,7 +718,7 @@ new_stock <- expand.grid(
   # since predicting only on fixed effects factor levels don't matter
   agg = unique(chin$agg),
   year = "2022",
-  fl = fl_agg
+  fl = mean_fl
 ) %>% 
   filter(stage == "mature", origin == "hatchery", !is.na(agg)) 
 
