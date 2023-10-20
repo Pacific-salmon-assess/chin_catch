@@ -1,10 +1,8 @@
 
 library(sf)
 library(raster)
-# library(rgdal)
 library(tidyverse)
 library(ncdf4)
-# library(maptools)
 library(rmapshaper)
 library(mapdata)
 library(rnaturalearth)
@@ -21,7 +19,7 @@ chin <- readRDS(here::here("data", "clean_catch.RDS"))
 
 crit_hab <- raster::shapefile(
   here::here("data", "critical_habitat_trim2", 
-             "pred_grid_utm_zone10_noBarkley_v2.shp")) %>% 
+             "Proposed_RKW_CriticalHabitat_SWVI_extended.shp")) %>% 
   # here::here("data", "critical_habitat_trim", 
   #            "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016_shrunk.shp")) %>% 
   sp::spTransform(., CRS("+proj=utm +zone=10 +units=m"))
@@ -74,9 +72,9 @@ dep_dat_full <- dep_dat_f(dep_list) %>%
 # convert each to raster, downscale, and add terrain data to both
 # then convert back to dataframes
 bc_raster <- rasterFromXYZ(dep_dat_full, 
-                           crs = sp::CRS("+proj=longlat +datum=WGS84"))
+                           crs = sf::st_crs("+proj=longlat +datum=WGS84"))
 bc_raster_utm <- projectRaster(bc_raster,
-                               crs = sp::CRS("+proj=utm +zone=10 +units=m"),
+                               crs = sf::st_crs("+proj=utm +zone=10 +units=m"),
                                # convert to 1000 m resolution
                                res = 1000)
 
@@ -111,7 +109,7 @@ ch_sf_list <- purrr::map(
     as(x, 'SpatialPixelsDataFrame') %>%
       as.data.frame() %>%
       st_as_sf(., coords = c("x", "y"),
-               crs = sp::CRS("+proj=utm +zone=10 +units=m"))
+               crs = sf::st_crs("+proj=utm +zone=10 +units=m"))
   }
 )
 
@@ -139,7 +137,7 @@ coast_dist <- geosphere::dist2Line(p = sf::st_coordinates(ch_sf_deg),
                                    line = as(coast, 'Spatial'))
 
 coast_utm <- coast %>% 
-  sf::st_transform(., crs = sp::CRS("+proj=utm +zone=10 +units=m"))
+  sf::st_transform(., crs = sf::st_crs("+proj=utm +zone=10 +units=m"))
 
 
 # combine all data
