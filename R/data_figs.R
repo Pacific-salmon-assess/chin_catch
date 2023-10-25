@@ -384,6 +384,9 @@ dev.off()
 
 # CONDITION --------------------------------------------------------------------
 
+chin <- readRDS(here::here("data", "clean_catch.RDS"))
+
+
 length_hist <- ggplot(chin, aes(x = fl, fill = stage)) +
   geom_histogram(col=I("black")) +
   geom_vline(aes(xintercept = 65), linetype = 1) +
@@ -398,12 +401,11 @@ png(here::here("figs", "ms_figs", "fl_histogram.png"), res = 250, units = "in",
 length_hist
 dev.off()
 
- 
 
 ## lipid content and fork length
 lipid_fl <- ggplot(chin %>% filter(!is.na(lipid), !is.na(agg))) +
   geom_point(aes(x = fl, y = lipid, fill = stage), shape = 21, alpha = 0.6) +
-  scale_fill_viridis_d(option = "B", guide = "none") +
+  scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   ggsidekick::theme_sleek() +
   facet_wrap(~agg) +
   labs(x = "Fork Length", y = "Lipid Content") +
@@ -415,7 +417,7 @@ fl_bp <- chin %>%
   filter(!is.na(agg)) %>%
   ggplot(., aes(x = agg, y = fl, fill = stage)) +
   geom_boxplot() +
-  scale_fill_viridis_d(guide = "none") +
+  scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   labs(y = "Fork Length") +
   ggsidekick::theme_sleek() +
   theme(
@@ -428,7 +430,7 @@ lipid_bp <- chin %>%
          !is.na(lipid)) %>%
   ggplot(., aes(x = agg, y = lipid, fill = stage)) +
   geom_boxplot() +
-  scale_fill_viridis_d(guide = "none") +
+  scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   labs(y = "Lipid Content") +
   ggsidekick::theme_sleek() +
   theme(
@@ -442,7 +444,6 @@ p3 <- cowplot::plot_grid(
 
 png(here::here("figs", "ms_figs", "fl_lipid.png"), res = 250, units = "in", 
     height = 5, width = 8.5)
-# lipid_fl
 cowplot::plot_grid(
   lipid_fl, p3, ncol = 2
 )
@@ -553,8 +554,9 @@ dev.off()
 ## predictions
 
 # fl-stage 
-fl_mature <- chin %>% 
-  filter(stage == "mature") %>% 
+fl_stage <- chin %>% 
+  filter(stage == "mature") %>%
+  # group_by(stage) %>% 
   summarize(
     fl = mean(fl, na.rm = T)
   ) 
@@ -566,9 +568,10 @@ new_yday <- expand.grid(
   origin = unique(chin$origin),
   # since predicting only on fixed effects factor levels don't matter
   agg = "ECVI",
-  year = "2022"
-) %>% 
-  left_join(., fl_stage, by = "stage") 
+  year = "2022",
+  fl = fl_stage$fl
+) #%>% 
+  # left_join(., fl_stage, by = "stage") 
 
 
 fl_preds <- predict(
@@ -609,12 +612,14 @@ yday_fl <- ggplot(new_dat %>% filter(origin == "hatchery")) +
               alpha = 0.3) +
   scale_fill_manual(values = stage_pal, guide = "none") +
   scale_colour_manual(values = stage_pal, guide = "none") +
-  labs(y = "Predicted Fork Length (cm)") +
+  labs(y = "Predicted Fork Length") +
   ggsidekick::theme_sleek() +
   theme(
     axis.title.x = element_blank()
   ) +
-  scale_x_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0),
+                     breaks = c(121, 182, 244),
+                     labels = c("May 1", "July 1", "Sep 1")) +
   scale_y_continuous(expand = c(0, 0)) 
 
 yday_lipid <- ggplot(new_dat %>% filter(origin == "hatchery")) +
@@ -623,14 +628,16 @@ yday_lipid <- ggplot(new_dat %>% filter(origin == "hatchery")) +
               alpha = 0.3) +
   scale_fill_manual(values = stage_pal) +
   scale_colour_manual(values = stage_pal) +
-  labs(y = "Predicted Lipid Content (cm)") +
+  labs(y = "Predicted Lipid Content") +
   ggsidekick::theme_sleek() +
   theme(
     axis.title.x = element_blank(),
     legend.position = "top",
     legend.title = element_blank()
   ) +
-  scale_x_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0),
+                     breaks = c(121, 182, 244),
+                     labels = c("May 1", "July 1", "Sep 1")) +
   scale_y_continuous(expand = c(0, 0)) 
 
 
@@ -642,15 +649,15 @@ yday_plots1 <- cowplot::plot_grid(
     theme(legend.position = "none"),
   ncol = 2
 )
-x_grob_yday <- grid::textGrob("Day of Year")
-yday_plots2 <- gridExtra::grid.arrange(
-  gridExtra::arrangeGrob(yday_plots1, bottom = x_grob_yday))
+# x_grob_yday <- grid::textGrob("Date")
+# yday_plots2 <- gridExtra::grid.arrange(
+#   gridExtra::arrangeGrob(yday_plots1, bottom = x_grob_yday))
 
 png(here::here("figs", "ms_figs", "yday_smooths.png"), res = 250, units = "in",
     height = 3.5, width = 6.5)
 cowplot::plot_grid(
   yday_legend, 
-  yday_plots2,
+  yday_plots1,
   ncol = 1,
   rel_heights = c(0.075, 1)
 )
@@ -721,12 +728,12 @@ new_stock <- expand.grid(
   fl = mean_fl
 ) %>% 
   filter(stage == "mature", origin == "hatchery", !is.na(agg)) 
-new_stock$agg <- factor(
-  new_stock$agg,
-  labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
-             "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
-             "Cali")
-)
+# new_stock$agg <- factor(
+#   new_stock$agg,
+#   labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
+#              "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
+#              "Cali")
+# )
 
 fl_preds_agg <- predict(
   fit_fl, newdata = new_stock, se.fit = TRUE,

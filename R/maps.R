@@ -44,6 +44,8 @@ coast_trim <- sf::st_crop(
   xmin = -128.5, ymin = 48, xmax = -122.5, ymax = 51.5
 ) %>% 
   sf::st_transform(., crs = sf::st_crs("+proj=utm +zone=10 +units=m"))
+# pull coordinates to fix projection
+coast_coords <- sf::st_coordinates(coast_trim)
 
 bath_grid <- readRDS(here::here("data", "pred_bathy_grid_1000m.RDS")) %>% 
   mutate(id = row_number(),
@@ -54,8 +56,8 @@ bath_grid <- readRDS(here::here("data", "pred_bathy_grid_1000m.RDS")) %>%
          Y > min(sets$yUTM - 500))
 
 crit_hab <- sf::st_read(
-  here::here("data", "critical_habitat_trim", 
-             "Proposed_RKW_CriticalHabitat update_SWVI_CSAS2016_shrunk.shp")) %>% 
+  here::here("data", "critical_habitat_trim2", 
+             "Proposed_RKW_CriticalHabitat_SWVI_extended.shp")) %>% 
   sf::st_transform(., crs = sf::st_crs("+proj=utm +zone=10 +units=m")) %>% 
   sf::st_crop(., 
               xmin = min(sets$xUTM + 500), 
@@ -66,17 +68,23 @@ crit_hab <- sf::st_read(
 
 main_map <- base_map +
   geom_sf(data = coast_trim, fill = "darkgrey") +
-  geom_sf(data = crit_hab, colour = "red", fill = "transparent", lty = 2) #+
-  # theme(axis.text = element_blank())
+  geom_sf(data = crit_hab, colour = "red", fill = "transparent", lty = 2) +
+  theme(axis.text = element_blank()) +
+  scale_x_continuous(limits = c(min(coast_coords[ , "X"]), 
+                                max(coast_coords[ , "X"]) - 10000), 
+                     expand = c(0, 0)) +
+  scale_y_continuous(limits = c(min(coast_coords[ , "Y"]) + 5000, 
+                                max(coast_coords[ , "Y"]) - 15000), 
+                     expand = c(0, 0))
 depth_map <- base_map +
   geom_raster(data = bath_grid, aes(x = X, y = Y, fill = depth)) +
   scale_fill_viridis_c(name = "Bottom\nDepth (m)", direction = -1)  +
-  theme(legend.position = "right",
+  theme(legend.position = "top",
         axis.text = element_blank())
 slope_map <- base_map +
   geom_raster(data = bath_grid, aes(x = X, y = Y, fill = slope)) +
   scale_fill_viridis_c(name = "Bottom\nSlope\n(degrees)", direction = -1)  +
-  theme(legend.position = "right",
+  theme(legend.position = "top",
         axis.text = element_blank())
 
 crit_hab_lat <- crit_hab %>% 
@@ -86,7 +94,7 @@ sets_only <- ggplot() +
   geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
   geom_point(data = sets, aes(x = lon, y = lat, fill = as.factor(year)),
              inherit.aes = FALSE, alpha = 0.4, shape = 21) +
-  geom_sf(data = crit_hab, colour = "red", fill = "transparent", lty = 2) +
+  # geom_sf(data = crit_hab, colour = "red", fill = "transparent", lty = 2) +
   ggsidekick::theme_sleek() +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) +
@@ -95,23 +103,21 @@ sets_only <- ggplot() +
         legend.title = element_blank(),
         axis.text = element_blank()) 
 
-p1 <- cowplot::plot_grid(
+png(here::here("figs", "ms_figs", "study_area1.png"), res = 250, units = "in", 
+    height = 5.5, width = 7)
+cowplot::ggdraw() +
+  cowplot::draw_plot(sets_only) +
+  cowplot::draw_plot(main_map,
+            height = 0.33, x = -0.33, y = 0.08)
+dev.off()
+
+
+png(here::here("figs", "ms_figs", "study_area2.png"), res = 250, units = "in", 
+    height = 7.5, width = 4)
+cowplot::plot_grid(
   depth_map, slope_map,
   ncol = 1
 )
-p2 <- cowplot::plot_grid(
-  main_map, sets_only,
-  ncol = 1
-)
-p3 <- cowplot::plot_grid(
-  plotlist = list(p2, p1),
-  ncol = 2,
-  rel_widths = c(1, 1.2)
-)
-
-png(here::here("figs", "ms_figs", "study_area.png"), res = 250, units = "in", 
-    height = 5.5, width = 7.5)
-p3
 dev.off()
 
 
