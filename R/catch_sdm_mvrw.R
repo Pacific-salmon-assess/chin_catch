@@ -85,7 +85,7 @@ dat_tbl$mesh <- purrr::map(
   dat_tbl$data,
   ~ make_mesh(.x,
               c("xUTM_ds", "yUTM_ds"),
-              n_knots = 125)
+              n_knots = 175)
 )
 
 

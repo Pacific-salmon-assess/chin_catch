@@ -6,7 +6,14 @@
 library(tidyverse)
 
 
-chin <- readRDS(here::here("data", "cleanTagData_GSI.RDS"))
+chin <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>% 
+  mutate(
+    size_bin = case_when(
+      fl < 65 ~ "small",
+      fl >= 65 & fl < 75 ~ "medium",
+      fl >= 75 ~ "large"
+    )
+  )
 
 age_in <- read.csv(here::here("data", "aging_data", "age_estimates.csv"),
                    stringsAsFactors = FALSE, na.strings=c("", "NA")) %>% 
@@ -22,7 +29,7 @@ age_in %>%
   tally()
 
 chin_age <- chin %>% 
-  select(fish, year, fl, stock, cu, agg_name, stock_id) %>% 
+  select(fish, year, fl, size_bin, stock, cu, agg_name, stock_id) %>% 
   left_join(., age_in, by = "fish") %>% 
   filter(!is.na(european_age)) %>% 
   mutate(
@@ -33,18 +40,47 @@ chin_age <- chin %>%
 labs <- chin_age %>% 
   group_by(ocean_age, fw_age) %>% 
   tally()
+labs2 <- chin_age %>% 
+  group_by(size_bin) %>% 
+  tally()
 
+alpha_pal <- c(0.2, 1.0)
+names(alpha_pal) <- unique(chin_age$fw_age)
 
-png(here::here("figs", "ms_figs", "age_size.png"), res = 250, units = "in", 
-    height = 5.5, width = 5.5)
-ggplot() +
-  geom_boxplot(data = chin_age, aes(x = ocean_age, y = fl, fill = fw_age)) +
+as_1 <- ggplot() +
+  geom_boxplot(data = chin_age, 
+               aes(x = ocean_age, y = fl, fill = ocean_age, alpha = fw_age)) +
   ggsidekick::theme_sleek() +
   geom_text(data = labs, 
             aes(x = ocean_age , y = 37, label = n, group = fw_age),
             position = position_dodge(width = .7)) +
+  scale_alpha_manual(values = alpha_pal, name = "Freshwater\nAge") +
   labs(x = "Ocean Age", y = "Fork Length") +
-  scale_fill_discrete(name = "Freshwater Age")
+  scale_fill_brewer(type = "div", palette = "RdYlBu", guide = "none") +
+  guides(alpha = guide_legend( 
+    override.aes=list(fill = "darkgrey")))
+
+
+#age comp by size_bin
+chin_age2 <- chin_age %>% 
+  group_by(size_bin) %>%
+  mutate(nn = n()) %>% 
+  ungroup() %>% 
+  group_by(size_bin, ocean_age, nn) %>%
+  tally() %>%
+  mutate(prop = n / nn) 
+as_2 <- ggplot() +
+  geom_bar(data = chin_age2, aes(x = size_bin, y = prop, fill = ocean_age),
+           position="stack", stat="identity") +
+  scale_fill_brewer(name = "Ocean\nAge", type = "div", palette = "RdYlBu") +
+  geom_text(data = labs2, 
+            aes(x = size_bin , y = -0.05, label = n)) +
+  labs(y = "Ocean Age", x = "Size Bin") +
+  ggsidekick::theme_sleek() 
+
+png(here::here("figs", "ms_figs", "age_size.png"), res = 250, units = "in", 
+    height = 5.5, width = 5.5)
+cowplot::plot_grid(as_1, as_2, ncol = 1)
 dev.off()
 
 

@@ -73,16 +73,6 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
                    stage),
     month = lubridate::month(date),
     year = as.factor(year),
-    agg_name = case_when(
-      cu == "LCR" ~ "Low Col.",
-      cu == "UWR" ~ "Low Col.",
-      cu %in% c("LFR-fall", "STh-0.3", "STh-SHUR") ~ "Fraser Sub.",
-      cu %in% c("MFR-summer", "NTh-sum", "STh-1.3", "LTh") ~ "Fraser Year.",
-      agg == "Fraser" ~ "Fraser Sub.",
-      agg == "Col" ~ "Up Col.",
-      agg == "PugetSo" ~ "Puget Sound",
-      TRUE ~ agg
-    ),
     # mu = case_when(
     #   agg_name %in% c("WCVI", "ECVI") ~ agg_name,
     #   cu == "LFR-fall" ~ "Fraser\nFall",
@@ -96,29 +86,22 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
       fl >= 65 & fl < 75 ~ "medium",
       fl >= 75 ~ "large"
     ),
-    agg_name = factor(
-      agg_name, levels = c(
-        "WCVI", "ECVI", "Fraser Year.", "Fraser Sub.", "Puget Sound",
-        "Low Col.", "Up Col.", "WA_OR", "Cali"
-      )#, 
-      # labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
-      #            "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
-      #            "Cali")
+    agg = factor(
+      agg, levels = c(
+        "WCVI", "ECVI", "Fraser Year.", "Fraser 4.1", "Fraser Fall",
+        "Puget Sound", "Low Col.", "Up Col.", "WA_OR", "Cali"
+      )
     ),
     origin = fct_relevel(
       origin, "hatchery", "wild", "unknown"
     ),
     stage = fct_relevel(
       stage, "mature", "immature"
-    )#,
-    # agg = factor(agg_name, 
-    #              labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
-    #                         "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
-    #                         "Cali"))
-  ) %>% 
+    )
+    ) %>% 
   dplyr::select(
     fish, vemco_code, event, date, year, month, year_day, deployment_time,
-    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg = agg_name
+    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg
   ) %>% 
   # remove 2023 data until GSI available
   filter(!year == "2023")
@@ -186,11 +169,13 @@ saveRDS(catch_size, here::here("data", "catch_size_pre.rds"))
 catch_stock1 <- chin  %>% 
   filter(
     !is.na(agg),
+    !agg == "Fraser Sub.",
     size_bin %in% c("large", "medium")
   ) %>%
   group_by(event, agg) %>%
   summarize(catch = n(), .groups = "drop") %>%
-  ungroup()
+  ungroup() %>% 
+  droplevels()
 
 catch_stock <- expand.grid(
   event = set_dat$event,
@@ -226,9 +211,10 @@ saveRDS(catch_origin, here::here("data", "catch_origin_pre.rds"))
 # SUPP TABLE OF STOCK BREAKDOWN ------------------------------------------------
 
 stock_table <- chin %>% 
-  filter(!is.na(stock)) %>% 
+  filter(!is.na(stock),
+         !stock == "Fraser Sub.") %>% 
   arrange(agg, cu, stock) %>% 
-  select(stock_aggregate = agg, conservation_unit = cu, stock) %>% 
+  dplyr::select(stock_aggregate = agg, conservation_unit = cu, stock) %>% 
   mutate(
     stock_aggregate = stock_aggregate %>% 
       str_replace_all(., "\n", " "),
@@ -249,13 +235,13 @@ write.csv(
 
 # table of stock breakdown
 total_comp_table <- chin %>% 
-  group_by(agg_name, cu, stock) %>% 
+  group_by(agg, cu, stock) %>% 
   tally() %>% 
   print(n = Inf)
 
 # table of origin
 clip_table <- chin %>% 
-  group_by(agg_name, cu, origin) %>% 
+  group_by(agg, cu, origin) %>% 
   tally() %>% 
   print(n = Inf)
 
@@ -265,12 +251,12 @@ full_comp <- chin %>%
   group_by(size_bin) %>%
   mutate(size_n = n()) %>% 
   ungroup() %>% 
-  group_by(agg_name, size_bin, size_n) %>%
+  group_by(agg, size_bin, size_n) %>%
   tally() %>%
   mutate(prop = n / size_n) 
 
 full_comp_stacked <- ggplot(full_comp, 
-                            aes(fill = agg_name, y = prop, x = size_bin)) + 
+                            aes(fill = agg, y = prop, x = size_bin)) + 
   geom_bar(position="stack", stat="identity") +
   scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60") +
   labs(y = "Proportion Stock Composition", x = "Size Class") +
@@ -282,19 +268,19 @@ month_comp <- chin %>%
   group_by(month) %>%
   mutate(month_n = n()) %>%
   ungroup() %>%
-  group_by(agg_name, month, month_n) %>%
+  group_by(agg, month, month_n) %>%
   tally() %>%
   mutate(prop = n / month_n)
 
 month_comp_stacked <- ggplot(month_comp,
-                            aes(fill = agg_name, y = prop, x = month)) +
+                            aes(fill = agg, y = prop, x = month)) +
   geom_bar(position="stack", stat="identity") +
   scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60" ) +
   labs(y = "Proportion Stock Composition", x = "Month") +
   ggsidekick::theme_sleek()
 
 # month_count_stacked <- ggplot(chin, 
-#        aes(fill = agg_name, #y = prop, 
+#        aes(fill = agg, #y = prop, 
 #            x = month)) + 
 #   geom_bar(position="stack") +#, stat="identity") +
 #   scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60" ) +
@@ -305,7 +291,7 @@ month_comp_stacked <- ggplot(month_comp,
 # composition by origin (supplmentary)
 origin_count_stacked <- ggplot(
   chin, 
-  aes(fill = agg_name, #y = prop, 
+  aes(fill = agg, #y = prop, 
       x = origin)
 ) + 
   geom_bar(position="stack") +#, stat="identity") +
@@ -350,7 +336,7 @@ origin_count_stacked <- ggplot(
 #   theme(axis.title.y = element_blank())
 
 stage_count_stacked <- ggplot(chin, 
-                               aes(fill = agg_name, #y = prop, 
+                               aes(fill = agg, #y = prop, 
                                    x = stage)) + 
   geom_bar(position="stack") +#, stat="identity") +
   scale_fill_viridis_d(guide = "none", na.value = "grey60") +
@@ -385,7 +371,7 @@ dev.off()
 # CONDITION --------------------------------------------------------------------
 
 chin <- readRDS(here::here("data", "clean_catch.RDS"))
-
+chin$agg2 <- str_replace(chin$agg, " ", "\n")
 
 length_hist <- ggplot(chin, aes(x = fl, fill = stage)) +
   geom_histogram(col=I("black")) +
@@ -403,7 +389,10 @@ dev.off()
 
 
 ## lipid content and fork length
-lipid_fl <- ggplot(chin %>% filter(!is.na(lipid), !is.na(agg))) +
+lipid_fl <- ggplot(
+  chin %>% 
+    filter(!is.na(lipid), !is.na(agg), !agg == "Fraser Sub.")
+) +
   geom_point(aes(x = fl, y = lipid, fill = stage), shape = 21, alpha = 0.6) +
   scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   ggsidekick::theme_sleek() +
@@ -414,8 +403,8 @@ lipid_fl <- ggplot(chin %>% filter(!is.na(lipid), !is.na(agg))) +
 
 ## size and lipid boxplots 
 fl_bp <- chin %>%
-  filter(!is.na(agg)) %>%
-  ggplot(., aes(x = agg, y = fl, fill = stage)) +
+  filter(!is.na(agg), !agg == "Fraser Sub.") %>%
+  ggplot(., aes(x = agg2, y = fl, fill = stage)) +
   geom_boxplot() +
   scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   labs(y = "Fork Length") +
@@ -427,8 +416,9 @@ fl_bp <- chin %>%
 
 lipid_bp <- chin %>%
   filter(!is.na(agg),
-         !is.na(lipid)) %>%
-  ggplot(., aes(x = agg, y = lipid, fill = stage)) +
+         !is.na(lipid),
+         !agg == "Fraser Sub.") %>%
+  ggplot(., aes(x = agg2, y = lipid, fill = stage)) +
   geom_boxplot() +
   scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   labs(y = "Lipid Content") +
@@ -453,7 +443,6 @@ dev.off()
 ## FIT FL/CONDITION MODELs -----------------------------------------------------
 
 library(mgcv)
-
 
 ## fit
 chin_fl <- chin %>% 
@@ -570,9 +559,7 @@ new_yday <- expand.grid(
   agg = "ECVI",
   year = "2022",
   fl = fl_stage$fl
-) #%>% 
-  # left_join(., fl_stage, by = "stage") 
-
+) 
 
 fl_preds <- predict(
   fit_fl, newdata = new_yday, se.fit = TRUE,
@@ -728,12 +715,7 @@ new_stock <- expand.grid(
   fl = mean_fl
 ) %>% 
   filter(stage == "mature", origin == "hatchery", !is.na(agg)) 
-# new_stock$agg <- factor(
-#   new_stock$agg,
-#   labels = c("WCVI", "ECVI", "Fraser\nYear.", "Fraser\nSub.", 
-#              "Puget\nSound", "Low\nCol.", "Up\nCol.","WA/OR",
-#              "Cali")
-# )
+new_stock$agg2 <- str_replace(new_stock$agg, " ", "\n")
 
 fl_preds_agg <- predict(
   fit_fl, newdata = new_stock, se.fit = TRUE,
@@ -761,7 +743,7 @@ new_dat3 <- new_stock %>%
 
 fl_agg <- ggplot(new_dat3) +
   geom_pointrange(
-    aes(x = agg, y = pred_fl, ymin = lo_fl, ymax = up_fl, fill = agg),
+    aes(x = agg2, y = pred_fl, ymin = lo_fl, ymax = up_fl, fill = agg2),
     shape = 21
   ) +
   scale_fill_viridis_d(guide = "none") +
@@ -773,7 +755,7 @@ fl_agg <- ggplot(new_dat3) +
 
 lipid_agg <- ggplot(new_dat3) +
   geom_pointrange(
-    aes(x = agg, y = pred_lipid, ymin = lo_lipid, ymax = up_lipid, fill = agg),
+    aes(x = agg2, y = pred_lipid, ymin = lo_lipid, ymax = up_lipid, fill = agg2),
     shape = 21
   ) +
   scale_fill_viridis_d(guide = "none") +
