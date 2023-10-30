@@ -499,6 +499,35 @@ dharma_res <- DHARMa::createDHARMa(
 plot(dharma_res)
 
 
+## posterior predictions
+# lipid_post <- fl_post <- vector(length = 8, mode = "list")
+# for (i in 1:8) {
+#   lipid_post[[i]] <- chin_lipid %>% 
+#     mutate(
+#       pred_lipid = sim_lipid[ , i]
+#     ) %>% 
+#     pivot_longer(
+#       cols = c(lipid, pred_lipid)
+#     ) %>% 
+#     ggplot(.) +
+#     geom_boxplot(aes(x = agg, y = value, fill = name)) +
+#     facet_wrap(~stage, scales = "free_x")
+#   fl_post[[i]] <- chin_fl %>% 
+#     mutate(
+#       pred_fl = sim_fl[ , i]
+#     ) %>% 
+#     pivot_longer(
+#       cols = c(fl, pred_fl)
+#     ) %>% 
+#     ggplot(.) +
+#     geom_boxplot(aes(x = agg, y = value, fill = name)) +
+#     facet_wrap(~stage, scales = "free_x")
+# }
+# 
+# cowplot::plot_grid(fl_post[[1]], fl_post[[2]], fl_post[[3]], 
+#                    fl_post[[4]], fl_post[[5]], fl_post[[6]],
+#                    ncol = 1)
+
 ## fixed effect sizes
 fl_fe <- broom::tidy(fit_fl, conf.int = TRUE, parametric = TRUE) %>% 
   mutate(
