@@ -34,7 +34,9 @@ catch_stock <- catch_stock1 %>%
          !grepl("rec", event),
          !tack == "yes") %>% 
   mutate(
-    bin = as.factor(agg)
+    bin = as.factor(agg),
+    mig = ifelse(
+      agg %in% c("Fraser Fall", "Puget Sound", "Low Col."), "res", "mig")
   ) %>% 
   droplevels()
 
@@ -195,6 +197,7 @@ plot_foo <- function(dat_in, var_in = "week", x_lab = "Week",
 
 # FIT MODELS -------------------------------------------------------------------
 
+# consider bin specific spatial effect
 fit_size <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) +
@@ -212,7 +215,23 @@ fit_size <- sdmTMB(
   share_range = FALSE,
   silent = FALSE
 )
-
+fit_size2 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
+    depth_z:bin + poly(moon_z, 2) +
+    slope_z:bin + poly(week_z, 2):bin,
+  offset = "offset",
+  data = dat_tbl$data[[1]],
+  mesh = dat_tbl$mesh[[1]],
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  # spatial_varying = ~ 0 + size_bin,
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "bin",
+  anisotropy = TRUE,
+  share_range = FALSE,
+  silent = FALSE
+)
 
 # CONSIDER MORE COMPLEX MODEL (1 share range off, 2 slack/moon included) w/ more
 # stocks
@@ -232,7 +251,22 @@ fit_stock <- sdmTMB(
   share_range = TRUE,
   silent = FALSE
 )
-
+fit_stock2 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
+    depth_z:mig +# poly(moon_z, 2) +
+    slope_z:mig + poly(week_z, 2):bin,
+  offset = "offset",
+  data = dat_tbl$data[[2]],
+  mesh = dat_tbl$mesh[[2]],
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "bin",
+  anisotropy = TRUE,
+  share_range = TRUE,
+  silent = FALSE
+)
 
 fit_origin <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
@@ -250,10 +284,29 @@ fit_origin <- sdmTMB(
   share_range = FALSE,
   silent = FALSE
 )
+fit_origin2 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
+    depth_z:bin + #poly(moon_z, 2) +
+    slope_z:bin + poly(week_z, 2):bin,
+  offset = "offset",
+  data = dat_tbl$data[[3]],
+  mesh = dat_tbl$mesh[[3]],
+  family = sdmTMB::nbinom1(),
+  spatial = "on",
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "bin",
+  anisotropy = TRUE,
+  share_range = FALSE,
+  silent = FALSE
+)
 
 saveRDS(fit_size, here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
 saveRDS(fit_stock, here::here("data", "model_fits", "fit_mvrfrw_stock.rds"))
 saveRDS(fit_origin, here::here("data", "model_fits", "fit_mvrfrw_origin.rds"))
+saveRDS(fit_size2, here::here("data", "model_fits", "fit_mvrfrw_size2.rds"))
+saveRDS(fit_stock2, here::here("data", "model_fits", "fit_mvrfrw_stock2.rds"))
+saveRDS(fit_origin2, here::here("data", "model_fits", "fit_mvrfrw_origin2.rds"))
 
 
 fit_size <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
