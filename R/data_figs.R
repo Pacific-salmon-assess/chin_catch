@@ -20,17 +20,19 @@ chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
          origin = case_when(
            genetic_source == "PBT" ~ "hatchery",
            clip == "Y" ~ "hatchery",
+           grepl("Fraser", agg_name) & genetic_source == "GSI" ~ 
+             "wild",
            agg_name %in% c("Fraser", "WCVI", "ECVI") & genetic_source == "GSI" ~ 
              "wild",
            # cu %in% c("LFR-fall", "SWVI", "QP-fall", "CWCH-KOK", "STh-SHUR",
            #   "EVIGStr-sum") & genetic_source == "GSI" ~ "wild",
-           agg_name %in% c("PugetSo", "Col") & clip == "N" ~ "wild",
+           agg_name %in% c("Puget Sound", "Up Col.","Low Col.") & clip == "N" ~ 
+             "wild",
            # stocks in WA_OR coastal that are in WA and therefore def mass marked
            stock %in% c("FORKS_CREEK_HATCHERY", "SOL_DUC_RIVER", 
-                        "TRASK_HATCHERY") & clip == "N" ~ "wild",
+                        "TRASK_HATCHERY", "ELWHA_FALL") & clip == "N" ~ "wild",
            TRUE ~ "unknown"
-         )
-         ) %>% 
+         )) %>% 
   rename(vemco_code = acoustic_year, agg = agg_name) %>% 
   left_join(., stage_dat, by = "vemco_code") 
 
@@ -86,9 +88,10 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
       fl >= 65 & fl < 75 ~ "medium",
       fl >= 75 ~ "large"
     ),
+    agg_name = fct_recode(agg, NULL = "Fraser Sub."),
     agg = factor(
       agg, levels = c(
-        "WCVI", "ECVI", "Fraser Year.", "Fraser 4.1", "Fraser Fall",
+        "WCVI", "ECVI", "Fraser Year.", "Fraser 4.1", "Fraser Fall", 
         "Puget Sound", "Low Col.", "Up Col.", "WA_OR", "Cali"
       )
     ),
@@ -102,10 +105,7 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
   dplyr::select(
     fish, vemco_code, event, date, year, month, year_day, deployment_time,
     fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg
-  ) %>% 
-  # remove 2023 data until GSI available
-  filter(!year == "2023")
-
+  ) 
 
 # summary of sample sizes
 chin %>% 
@@ -127,7 +127,6 @@ set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
     # pool undersampled months
     month = case_when(
       month %in% c(4, 5) ~ 5,
-      # month %in% c(8, 9) ~ 8,
       TRUE ~ month
     ),
     month_f = month %>% 
@@ -139,8 +138,7 @@ set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
 chin_juv <- read.csv(
   here::here("data", "bycatchData.csv"),
   stringsAsFactors = F) %>% 
-  filter(species == "chinook",
-         !grepl("2023", event)) %>% 
+  filter(species == "chinook") %>% 
   mutate(size_bin = "sublegal") %>% 
   dplyr::select(
     event, size_bin, catch = count
@@ -394,7 +392,7 @@ lipid_fl <- ggplot(
     filter(!is.na(lipid), !is.na(agg), !agg == "Fraser Sub.")
 ) +
   geom_point(aes(x = fl, y = lipid, fill = stage), shape = 21, alpha = 0.6) +
-  scale_fill_brewer(type = "div", palette = 5, guide = "none") +
+  scale_fill_brewer(type = "div", palette = 5) +
   ggsidekick::theme_sleek() +
   facet_wrap(~agg) +
   labs(x = "Fork Length", y = "Lipid Content") +
@@ -404,7 +402,8 @@ lipid_fl <- ggplot(
 ## size and lipid boxplots 
 fl_bp <- chin %>%
   filter(!is.na(agg), !agg == "Fraser Sub.") %>%
-  ggplot(., aes(x = agg2, y = fl, fill = stage)) +
+  ggplot(., aes(x = fct_reorder(agg2, as.numeric(agg)),
+                y = fl, fill = stage)) +
   geom_boxplot() +
   scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   labs(y = "Fork Length") +
@@ -418,7 +417,8 @@ lipid_bp <- chin %>%
   filter(!is.na(agg),
          !is.na(lipid),
          !agg == "Fraser Sub.") %>%
-  ggplot(., aes(x = agg2, y = lipid, fill = stage)) +
+  ggplot(., aes(x =  fct_reorder(agg2, as.numeric(agg)), y = lipid, 
+                fill = stage)) +
   geom_boxplot() +
   scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   labs(y = "Lipid Content") +
@@ -502,29 +502,32 @@ plot(dharma_res)
 ## posterior predictions
 # lipid_post <- fl_post <- vector(length = 8, mode = "list")
 # for (i in 1:8) {
-#   lipid_post[[i]] <- chin_lipid %>% 
+#   lipid_post[[i]] <- chin_lipid %>%
 #     mutate(
 #       pred_lipid = sim_lipid[ , i]
-#     ) %>% 
+#     ) %>%
 #     pivot_longer(
 #       cols = c(lipid, pred_lipid)
-#     ) %>% 
+#     ) %>%
 #     ggplot(.) +
 #     geom_boxplot(aes(x = agg, y = value, fill = name)) +
 #     facet_wrap(~stage, scales = "free_x")
-#   fl_post[[i]] <- chin_fl %>% 
+#   fl_post[[i]] <- chin_fl %>%
 #     mutate(
 #       pred_fl = sim_fl[ , i]
-#     ) %>% 
+#     ) %>%
 #     pivot_longer(
 #       cols = c(fl, pred_fl)
-#     ) %>% 
+#     ) %>%
 #     ggplot(.) +
 #     geom_boxplot(aes(x = agg, y = value, fill = name)) +
 #     facet_wrap(~stage, scales = "free_x")
 # }
 # 
-# cowplot::plot_grid(fl_post[[1]], fl_post[[2]], fl_post[[3]], 
+# cowplot::plot_grid(lipid_post[[1]], lipid_post[[2]], lipid_post[[3]],
+#                    lipid_post[[4]], lipid_post[[5]], lipid_post[[6]],
+#                    ncol = 1)
+# cowplot::plot_grid(fl_post[[1]], fl_post[[2]], fl_post[[3]],
 #                    fl_post[[4]], fl_post[[5]], fl_post[[6]],
 #                    ncol = 1)
 
