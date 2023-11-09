@@ -471,10 +471,12 @@ nd_depth <- expand.grid(
   month = 7, 
   slack_z = 0,
   moon_z = 0,
-  bin = "medium",
+  bin = unique(dat_tbl$data[[1]]$bin),
   depth_z = seq(-2, 2, length = 30),
-  slope_z = 0
-) 
+  slope_z = 0,
+  sunrise_z = 0
+) %>% 
+  filter(bin == "medium")
 p_depth <- pred_foo(x = "depth", nd = nd_depth, fit = fit_size)
 
 # fixed slope effects
@@ -501,8 +503,16 @@ nd_moon <- nd_depth %>%
   )
 p_moon <- pred_foo(x = "moon", nd = nd_moon, fit = fit_size)
 
+# fixed lunar effects
+nd_sunrise <- nd_depth %>% 
+  mutate(
+    sunrise_z = seq(-2.1, 3.2, length = 30),
+    moon_z = 0
+  )
+p_sunrise <- pred_foo(x = "sunrise", nd = nd_sunrise, fit = fit_size)
 
-full_p <- list(p_depth, p_slope, p_slack, p_moon) %>% 
+
+full_p <- list(p_depth, p_slope, p_slack, p_moon, p_sunrise) %>% 
   do.call(rbind, .) %>%
   group_by(variable) %>% 
   mutate(
@@ -512,6 +522,8 @@ full_p <- list(p_depth, p_slope, p_slack, p_moon) %>%
       mean(catch_size$hours_from_slack),
     moon = (moon_z * sd(catch_size$moon_illuminated)) +
       mean(catch_size$moon_illuminated),
+    sunrise = (sunrise_z * sd(catch_size$time_since_sunrise)) +
+      mean(catch_size$time_since_sunrise),
     exp_est = exp(est),
     max_est = max(exp_est),
     scale_est = exp_est / max_est,
@@ -537,10 +549,14 @@ moon_plot <- plot_foo(dat_in  = full_p, var_in = "moon",
                       x_lab = "Proportion Moon Illuminated",
                       col_in = size_main) +
   theme(axis.title.y = element_blank())
+sunrise_plot <- plot_foo(dat_in  = full_p, var_in = "sunrise", 
+                      x_lab = "Hours From Sunrise",
+                      col_in = size_main) +
+  theme(axis.title.y = element_blank())
 
 p1 <- cowplot::plot_grid(
-  depth_plot, slope_plot, slack_plot, moon_plot,
-  ncol = 2
+  depth_plot, slope_plot, slack_plot, moon_plot, sunrise_plot,
+  ncol = 3
 )
 
 
