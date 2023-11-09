@@ -121,7 +121,7 @@ saveRDS(chin, here::here("data", "clean_catch.RDS"))
 # PREP INDIVIDUAL DATASETS -----------------------------------------------------
 
 # clean and bind to set data
-set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>% 
+set_dat1 <- readRDS(here::here("data", "cleanSetData.RDS")) %>% 
   mutate(
     week = lubridate::week(date_time_local),
     # pool undersampled months
@@ -132,6 +132,26 @@ set_dat <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
     month_f = month %>% 
       as.factor()
   )
+
+# add sunrise/sunset data
+sun_data <- data.frame(date = as.Date(set_dat$date_time_local),
+                       lat = set_dat$lat, 
+                       lon = set_dat$lon)
+temp <- suncalc::getSunlightTimes(data = sun_data,
+                                  keep = c("sunrise", "sunset"),
+                                  tz = "America/Los_Angeles") %>% 
+  mutate(time_since_sunrise = difftime(date, sunrise,  tz = "America/Los_Angeles", units = "hours"))
+set_dat <- set_dat1 %>% 
+  mutate(
+    sunrise = temp$sunrise,
+    time_since_sunrise = difftime(
+      date_time_local, sunrise, tz = "America/Los_Angeles", units = "hours"
+    ) %>% 
+      as.numeric(),
+    time_since_sunrise = ifelse(time_since_sunrise < 0, time_since_sunrise * -1, 
+                                time_since_sunrise)
+  )
+
 
 ## size data (combine sublegal and adult)
 # import bycatch data representing sublegal catch

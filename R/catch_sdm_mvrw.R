@@ -70,7 +70,8 @@ dat_tbl$data <- purrr::map(
       slack_z = scale(hours_from_slack)[ , 1],
       week_z = scale(week)[ , 1],
       moon_z = scale(moon_illuminated)[ , 1],
-      dist_z = scale(coast_dist_km)[ , 1]
+      dist_z = scale(coast_dist_km)[ , 1],
+      sunrise_z = scale(time_since_sunrise)[ , 1]
     )
 )
 
@@ -136,7 +137,8 @@ dat_tbl$pred_data <- purrr::map(
         month_f = as.factor(month),
         week_z = (week - mean(x$week)) / sd(x$week),
         depth_z = (depth - mean(x$mean_depth)) / sd(x$mean_depth),
-        slope_z = (slope - mean(x$mean_slope)) / sd(x$mean_slope)
+        slope_z = (slope - mean(x$mean_slope)) / sd(x$mean_slope),
+        sunrise_z = (slope - mean(x$time_since_sunrise)) / sd(x$time_since_sunrise)
       ) 
   }
 )
@@ -197,10 +199,9 @@ plot_foo <- function(dat_in, var_in = "week", x_lab = "Week",
 
 # FIT MODELS -------------------------------------------------------------------
 
-# consider bin specific spatial effect
 fit_size <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
-    depth_z + poly(moon_z, 2) +
+    depth_z + poly(moon_z, 2) + poly(sunrise_z, 2) +
     slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[1]],
@@ -215,23 +216,7 @@ fit_size <- sdmTMB(
   share_range = FALSE,
   silent = FALSE
 )
-fit_size2 <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
-    depth_z:bin + poly(moon_z, 2) +
-    slope_z:bin + poly(week_z, 2):bin,
-  offset = "offset",
-  data = dat_tbl$data[[1]],
-  mesh = dat_tbl$mesh[[1]],
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  # spatial_varying = ~ 0 + size_bin,
-  time = "month",
-  spatiotemporal = "rw",
-  groups = "bin",
-  anisotropy = TRUE,
-  share_range = FALSE,
-  silent = FALSE
-)
+
 
 # CONSIDER MORE COMPLEX MODEL (1 share range off, 2 slack/moon included) w/ more
 # stocks
