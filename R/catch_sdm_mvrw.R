@@ -6,6 +6,12 @@
 # Also include static spatial variables (e.g. depth/slope) and dynamic 
 # fine-scale (e.g. time of day) 
 
+
+# ensure mvrfrw branch installed
+devtools::install_github("https://github.com/pbs-assess/sdmTMB",
+                         ref = "mvrfrw")
+
+library(dplyr)
 library(tidyverse)
 library(sdmTMB)
 library(ggplot2)
@@ -220,7 +226,8 @@ fit_size <- sdmTMB(
 )
 
 
-# CONSIDER MORE COMPLEX MODEL (1 share range off, 2 slack/moon included)
+# CONSIDER MORE COMPLEX MODEL (2 slack/moon included)
+# interaction with mig not supported by AIC (delta < 2)
 fit_stock <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
     depth_z + sunrise_z +# poly(moon_z, 2) +
@@ -234,25 +241,10 @@ fit_stock <- sdmTMB(
   spatiotemporal = "rw",
   groups = "bin",
   anisotropy = TRUE,
-  share_range = TRUE,
+  share_range = FALSE,
   silent = FALSE
 )
-fit_stock2 <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
-    depth_z:mig +# poly(moon_z, 2) +
-    slope_z:mig + poly(week_z, 2):bin,
-  offset = "offset",
-  data = dat_tbl$data[[2]],
-  mesh = dat_tbl$mesh[[2]],
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  time = "month",
-  spatiotemporal = "rw",
-  groups = "bin",
-  anisotropy = TRUE,
-  share_range = TRUE,
-  silent = FALSE
-)
+
 
 fit_origin <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
@@ -270,29 +262,10 @@ fit_origin <- sdmTMB(
   share_range = FALSE,
   silent = FALSE
 )
-fit_origin2 <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
-    depth_z:bin + #poly(moon_z, 2) +
-    slope_z:bin + poly(week_z, 2):bin,
-  offset = "offset",
-  data = dat_tbl$data[[3]],
-  mesh = dat_tbl$mesh[[3]],
-  family = sdmTMB::nbinom1(),
-  spatial = "on",
-  time = "month",
-  spatiotemporal = "rw",
-  groups = "bin",
-  anisotropy = TRUE,
-  share_range = FALSE,
-  silent = FALSE
-)
 
 saveRDS(fit_size, here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
 saveRDS(fit_stock, here::here("data", "model_fits", "fit_mvrfrw_stock.rds"))
 saveRDS(fit_origin, here::here("data", "model_fits", "fit_mvrfrw_origin.rds"))
-saveRDS(fit_size2, here::here("data", "model_fits", "fit_mvrfrw_size2.rds"))
-saveRDS(fit_stock2, here::here("data", "model_fits", "fit_mvrfrw_stock2.rds"))
-saveRDS(fit_origin2, here::here("data", "model_fits", "fit_mvrfrw_origin2.rds"))
 
 
 fit_size <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
@@ -406,7 +379,8 @@ dat_tbl$week_preds <- purrr::map2(
       year_f = "2020",
       week_z = seq(-2, 2, length = 30),
       month = 7,
-      slack_z = 0,
+      sunrise_z = 0,
+      # slack_z = 0,
       moon_z = 0,
       bin = unique(x$bin),
       depth_z = 0,
@@ -489,12 +463,12 @@ nd_slope <- nd_depth %>%
 p_slope <- pred_foo(x = "slope", nd = nd_slope, fit = fit_size)
 
 # fixed slack effects
-nd_slack <- nd_depth %>% 
-  mutate(
-    slack_z = seq(-3, 3, length = 30),
-    depth_z = 0
-  )
-p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit_size)
+# nd_slack <- nd_depth %>% 
+#   mutate(
+#     slack_z = seq(-3, 3, length = 30),
+#     depth_z = 0
+#   )
+# p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit_size)
 
 # fixed lunar effects
 nd_moon <- nd_depth %>% 
@@ -504,7 +478,7 @@ nd_moon <- nd_depth %>%
   )
 p_moon <- pred_foo(x = "moon", nd = nd_moon, fit = fit_size)
 
-# fixed lunar effects
+# fixed sunrise effects
 nd_sunrise <- nd_depth %>% 
   mutate(
     sunrise_z = seq(-2.1, 3.2, length = 30),
@@ -513,14 +487,15 @@ nd_sunrise <- nd_depth %>%
 p_sunrise <- pred_foo(x = "sunrise", nd = nd_sunrise, fit = fit_size)
 
 
-full_p <- list(p_depth, p_slope, p_slack, p_moon, p_sunrise) %>% 
+full_p <- list(p_depth, p_slope, #p_slack, 
+               p_moon, p_sunrise) %>% 
   do.call(rbind, .) %>%
   group_by(variable) %>% 
   mutate(
     depth = (depth_z * sd(catch_size$mean_depth)) + mean(catch_size$mean_depth),
     slope = (slope_z * sd(catch_size$mean_slope)) + mean(catch_size$mean_slope),
-    slack = (slack_z * sd(catch_size$hours_from_slack)) +
-      mean(catch_size$hours_from_slack),
+    # slack = (slack_z * sd(catch_size$hours_from_slack)) +
+    #   mean(catch_size$hours_from_slack),
     moon = (moon_z * sd(catch_size$moon_illuminated)) +
       mean(catch_size$moon_illuminated),
     sunrise = (sunrise_z * sd(catch_size$time_since_sunrise)) +
@@ -543,9 +518,9 @@ depth_plot <- plot_foo(dat_in  = full_p, var_in = "depth",
 slope_plot <- plot_foo(dat_in  = full_p, var_in = "slope", 
                        x_lab = "Bottom Slope (degrees)", col_in = size_main) +
   theme(axis.title.y = element_blank())
-slack_plot <- plot_foo(dat_in  = full_p, var_in = "slack", 
-                       x_lab = "Hours From Slack", col_in = size_main) +
-  theme(axis.title.y = element_blank())
+# slack_plot <- plot_foo(dat_in  = full_p, var_in = "slack", 
+#                        x_lab = "Hours From Slack", col_in = size_main) +
+#   theme(axis.title.y = element_blank())
 moon_plot <- plot_foo(dat_in  = full_p, var_in = "moon", 
                       x_lab = "Proportion Moon Illuminated",
                       col_in = size_main) +
@@ -556,8 +531,9 @@ sunrise_plot <- plot_foo(dat_in  = full_p, var_in = "sunrise",
   theme(axis.title.y = element_blank())
 
 p1 <- cowplot::plot_grid(
-  depth_plot, slope_plot, slack_plot, moon_plot, sunrise_plot,
-  ncol = 3
+  depth_plot, slope_plot, #slack_plot, 
+  moon_plot, sunrise_plot,
+  ncol = 2
 )
 
 

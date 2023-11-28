@@ -26,11 +26,12 @@ chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
              "wild",
            # cu %in% c("LFR-fall", "SWVI", "QP-fall", "CWCH-KOK", "STh-SHUR",
            #   "EVIGStr-sum") & genetic_source == "GSI" ~ "wild",
-           agg_name %in% c("Puget Sound", "Up Col.","Low Col.") & clip == "N" ~ 
-             "wild",
+           # mass marking common for all OR and WA stocks
+           agg_name %in% c("Puget Sound", "Up Col.","Low Col.", "WA_OR") & 
+             clip == "N" ~  "wild",
            # stocks in WA_OR coastal that are in WA and therefore def mass marked
-           stock %in% c("FORKS_CREEK_HATCHERY", "SOL_DUC_RIVER", 
-                        "TRASK_HATCHERY", "ELWHA_FALL") & clip == "N" ~ "wild",
+           # stock %in% c("FORKS_CREEK_HATCHERY", "SOL_DUC_RIVER", 
+           #              "TRASK_HATCHERY", "ELWHA_FALL") & clip == "N" ~ "wild",
            TRUE ~ "unknown"
          )) %>% 
   rename(vemco_code = acoustic_year, agg = agg_name) %>% 
@@ -134,9 +135,9 @@ set_dat1 <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
   )
 
 # add sunrise/sunset data
-sun_data <- data.frame(date = as.Date(set_dat$date_time_local),
-                       lat = set_dat$lat, 
-                       lon = set_dat$lon)
+sun_data <- data.frame(date = as.Date(set_dat1$date_time_local),
+                       lat = set_dat1$lat, 
+                       lon = set_dat1$lon)
 temp <- suncalc::getSunlightTimes(data = sun_data,
                                   keep = c("sunrise", "sunset"),
                                   tz = "America/Los_Angeles") %>% 
@@ -187,7 +188,6 @@ saveRDS(catch_size, here::here("data", "catch_size_pre.rds"))
 catch_stock1 <- chin  %>% 
   filter(
     !is.na(agg),
-    !agg == "Fraser Sub.",
     size_bin %in% c("large", "medium")
   ) %>%
   group_by(event, agg) %>%
@@ -589,7 +589,6 @@ png(here::here("figs", "ms_figs", "fes.png"), res = 250, units = "in",
     height = 3.25, width = 6.5)
 fe_plot
 dev.off()
-
 
 
 ## predictions
