@@ -132,6 +132,7 @@ dat_tbl$pred_data <- purrr::map(
         xUTM_ds = X / 1000,
         yUTM_ds = Y / 1000,
         slack_z = 0,
+        sunrise_z = 0,
         moon_z = 0,
         month = case_when(
           week < 23 ~ 5,
@@ -143,9 +144,8 @@ dat_tbl$pred_data <- purrr::map(
         month_f = as.factor(month),
         week_z = (week - mean(x$week)) / sd(x$week),
         depth_z = (depth - mean(x$mean_depth)) / sd(x$mean_depth),
-        slope_z = (slope - mean(x$mean_slope)) / sd(x$mean_slope),
-        sunrise_z = (slope - mean(x$time_since_sunrise)) / sd(x$time_since_sunrise)
-      ) 
+        slope_z = (slope - mean(x$mean_slope)) / sd(x$mean_slope)
+        ) 
   }
 )
 
@@ -273,11 +273,9 @@ fit_stock <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_stock.rds"))
 fit_origin <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_origin.rds"))
 
 fit_list <- list(fit_size, fit_stock, fit_origin)
-
+names(fit_list) <- c("size", "stock", "origin")
 
 ## SIMULATION CHECKS -----------------------------------------------------------
-
-## TODO: check all groups
 
 qq_list <- purrr::map2(
   fit_list,
@@ -288,34 +286,23 @@ qq_list <- purrr::map2(
   }
 )
 
-
-
-# sample from posterior using MCMC to avoid Laplace approximation
-object <- fit
-samp <- sample_mle_mcmc(object, mcmc_iter = 130, mcmc_warmup = 100)
-
-obj <- object$tmb_obj
-random <- unique(names(obj$env$par[obj$env$random]))
-pl <- as.list(object$sd_report, "Estimate")
-fixed <- !(names(pl) %in% random)
-map <- lapply(pl[fixed], function(x) factor(rep(NA, length(x))))
-obj <- TMB::MakeADFun(obj$env$data, pl, map = map, DLL = "sdmTMB")
-obj_mle <- object
-obj_mle$tmb_obj <- obj
-obj_mle$tmb_map <- map
-ss <- simulate(obj_mle, mcmc_samples = extract_mcmc(samp), nsim = 30)
-
-
-pred_fixed <- fit$family$linkinv(
-  predict(fit, newdata = catch_size)$est_non_rf
+# spatiotemporal resolution of fits
+resid_plots <- purrr::map2(
+  fit_list, names(fit_list), function (x, y) {
+    dum <- x$data %>% 
+      mutate(resid = resid(x))
+    ggplot(dum) +
+      geom_point(aes(x = xUTM_ds, y = yUTM_ds, colour = resid)) +
+      facet_grid(month_f ~ year_f) +
+      scale_colour_gradient2() +
+      labs(title = y) +
+      ggsidekick::theme_sleek()
+  }
 )
-r_nb1_size <- DHARMa::createDHARMa(
-  simulatedResponse = ss,
-  observedResponse = fit$data$catch,
-  fittedPredictedResponse = pred_fixed
-)
-DHARMa::testResiduals(r_nb1_size)
-# all looks good
+
+pdf(here::here("figs", "diagnostics", "resid_spatial.pdf"))
+resid_plots
+dev.off()
 
 
 ## FIXED EFFECTS ---------------------------------------------------------------

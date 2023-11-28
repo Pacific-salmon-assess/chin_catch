@@ -297,22 +297,22 @@ month_comp_stacked <- ggplot(month_comp,
   labs(y = "Proportion Stock Composition", x = "Month") +
   ggsidekick::theme_sleek()
 
-# month_count_stacked <- ggplot(chin, 
-#        aes(fill = agg, #y = prop, 
-#            x = month)) + 
-#   geom_bar(position="stack") +#, stat="identity") +
-#   scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60" ) +
-#   labs(y = "Number of Individuals", x = "Origin") +
-#   ggsidekick::theme_sleek()  +
-#   theme(axis.title.y = element_blank())
+
 
 # composition by origin (supplmentary)
-origin_count_stacked <- ggplot(
-  chin, 
-  aes(fill = agg, #y = prop, 
-      x = origin)
+origin_comp <- chin %>%
+  group_by(origin) %>%
+  mutate(origin_n = n()) %>%
+  ungroup() %>%
+  group_by(agg, origin, origin_n) %>%
+  tally() %>%
+  mutate(prop = n / origin_n)
+
+origin_comp_stacked <- ggplot(
+  origin_comp, 
+  aes(fill = agg, y = prop,  x = origin)
 ) + 
-  geom_bar(position="stack") +#, stat="identity") +
+  geom_bar(position="stack", stat="identity") +
   scale_fill_viridis_d(guide = "none", na.value = "grey60") +
   labs(x = "Origin", y = "Number of Individuals") +
   ggsidekick::theme_sleek() 
