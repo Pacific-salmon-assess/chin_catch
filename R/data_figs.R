@@ -11,29 +11,55 @@ library(tidyverse)
 
 # Import stage data and fitted model generated in gen_detection_histories.R
 stage_dat <- readRDS(here::here("data", "agg_lifestage_df.RDS")) %>% 
-  dplyr::select(vemco_code, stage)
+  dplyr::select(vemco_code, stage) 
+
+# Import PBT tagging rate; define as high probability greater than 80% coverage
+pbt_rate <- readRDS(here::here("data", "mean_pbt_rate.rds")) %>% 
+  select(stock = collection_extract, brood_year = year, tag_rate)
 
 
 chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
-  mutate(year_day = lubridate::yday(date),
-         # define hatchery
-         origin = case_when(
-           genetic_source == "PBT" ~ "hatchery",
-           clip == "Y" ~ "hatchery",
-           grepl("Fraser", agg_name) & genetic_source == "GSI" ~ 
-             "wild",
-           agg_name %in% c("Fraser", "WCVI", "ECVI") & genetic_source == "GSI" ~ 
-             "wild",
-           # cu %in% c("LFR-fall", "SWVI", "QP-fall", "CWCH-KOK", "STh-SHUR",
-           #   "EVIGStr-sum") & genetic_source == "GSI" ~ "wild",
-           # mass marking common for all OR and WA stocks
-           agg_name %in% c("Puget Sound", "Up Col.","Low Col.", "WA_OR") & 
-             clip == "N" ~  "wild",
-           # stocks in WA_OR coastal that are in WA and therefore def mass marked
-           # stock %in% c("FORKS_CREEK_HATCHERY", "SOL_DUC_RIVER", 
-           #              "TRASK_HATCHERY", "ELWHA_FALL") & clip == "N" ~ "wild",
-           TRUE ~ "unknown"
-         )) %>% 
+  mutate(
+    year_day = lubridate::yday(date),
+    fw_age = ifelse(
+      cu %in% c("CACV-Sp", "STh-1.3", "NTh-sum", "MFR-summer", "MFR-spring",
+                "UFR-spring"),
+      2,
+      1
+    ),
+    # change stocks to match PBT table
+    stock = case_when(
+      grepl("CHILLIWACK", stock) ~ "CHILLIWACK_RIVER_fall",
+      grepl("SHUSWAP", stock) ~ "SHUSWAP_RIVER-LOWER (includes Kingfisher)",
+      TRUE ~ stock
+    ),
+    # brood year equals FW age plus ocean age (3 for large, 2 medium/small)
+    brood_year = ifelse(
+      size == "large", year - 3 - fw_age, year - 2 - fw_age
+    )
+  ) %>% 
+  left_join(., pbt_rate, by = c("stock", "brood_year")) %>% 
+  # define hatchery origin based on clip and PBT
+  mutate(
+    origin = case_when(
+      genetic_source == "PBT" ~ "hatchery",
+      clip == "Y" ~ "hatchery",
+      # if belongs to PBT stock with high tagging rate and ID'd using GSI = wild
+      agg_name %in% c("WCVI", "ECVI", "Fraser Fall", "Fraser 4.1", "Fraser Sub.",
+                      "Fraser Year.") & 
+        genetic_source == "GSI" & 
+        tag_rate > 0.8 ~ "wild",
+      # if belongs to non-PBT stock = wild
+      agg_name %in% c("WCVI", "ECVI", "Fraser Fall", "Fraser 4.1", "Fraser Sub.",
+                      "Fraser Year.") & 
+        genetic_source == "GSI" & 
+        !(stock %in% pbt_rate$stock) ~ "wild",
+      # mass marking common for all OR and WA stocks
+      agg_name %in% c("Puget Sound", "Up Col.","Low Col.", "WA_OR") &
+        clip == "N" ~  "wild",
+      TRUE ~ "unknown"
+    )
+  ) %>% 
   rename(vemco_code = acoustic_year, agg = agg_name) %>% 
   left_join(., stage_dat, by = "vemco_code") 
 
@@ -276,7 +302,8 @@ full_comp <- chin %>%
 full_comp_stacked <- ggplot(full_comp, 
                             aes(fill = agg, y = prop, x = size_bin)) + 
   geom_bar(position="stack", stat="identity") +
-  scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60") +
+  scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
+                    type = "qual", palette = "Paired") +
   labs(y = "Proportion Stock Composition", x = "Size Class") +
   ggsidekick::theme_sleek()
 
@@ -293,9 +320,11 @@ month_comp <- chin %>%
 month_comp_stacked <- ggplot(month_comp,
                             aes(fill = agg, y = prop, x = month)) +
   geom_bar(position="stack", stat="identity") +
-  scale_fill_viridis_d(name = "Stock Aggregate", na.value = "grey60" ) +
-  labs(y = "Proportion Stock Composition", x = "Month") +
-  ggsidekick::theme_sleek()
+  scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
+                    type = "qual", palette = "Paired") +
+  labs(x = "Month") +
+  ggsidekick::theme_sleek() +
+  theme(axis.title.y = element_blank())
 
 
 
@@ -310,86 +339,62 @@ origin_comp <- chin %>%
 
 origin_comp_stacked <- ggplot(
   origin_comp, 
-  aes(fill = agg, y = prop,  x = origin)
+  aes(fill = agg, y = prop, x = origin)
 ) + 
   geom_bar(position="stack", stat="identity") +
-  scale_fill_viridis_d(guide = "none", na.value = "grey60") +
-  labs(x = "Origin", y = "Number of Individuals") +
-  ggsidekick::theme_sleek() 
-
-# origin by size class
-# origin_size_comp <- chin %>% 
-#   group_by(size_bin) %>%
-#   mutate(size_n = n()) %>% 
-#   ungroup() %>% 
-#   group_by(origin, size_bin, size_n) %>%
-#   tally() %>%
-#   mutate(prop = n / size_n) 
-# 
-# ggplot(origin_size_comp, 
-#        aes(fill = origin, y = prop, x = size_bin)) + 
-#   geom_bar(position="stack", stat="identity") +
-#   scale_fill_viridis_d(name = "Origin", na.value = "grey60" ) +
-#   labs(y = "Proportion Origin Composition", x = "Size Bin") +
-#   ggsidekick::theme_sleek() +
-#   theme(axis.title.y = element_blank())
+  scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
+                    type = "qual", palette = "Paired", guide = "none") +
+  labs(x = "Origin") +
+  ggsidekick::theme_sleek()  +
+  theme(axis.title.y = element_blank())
 
 
 # composition by maturity stage
-# stage_comp <- chin %>% 
-#   group_by(stage) %>%
-#   mutate(stage_n = n()) %>% 
-#   ungroup() %>% 
-#   group_by(agg_name, stage, stage_n) %>%
-#   tally() %>%
-#   mutate(prop = n / stage_n) 
-# 
-# stage_comp_stacked <- ggplot(stage_comp, 
-#                             aes(fill = agg_name, y = prop, 
-#                                 x = stage)) + 
-#   geom_bar(position="stack", stat="identity") +
-#   scale_fill_viridis_d(guide = "none", na.value = "grey60") +
-#   labs(x = "Maturity Stage") +
-#   ggsidekick::theme_sleek() +
-#   theme(axis.title.y = element_blank())
+stage_comp <- chin %>%
+  group_by(stage) %>%
+  mutate(stage_n = n()) %>%
+  ungroup() %>%
+  group_by(agg, stage, stage_n) %>%
+  tally() %>%
+  mutate(prop = n / stage_n)
 
-stage_count_stacked <- ggplot(chin, 
-                               aes(fill = agg, #y = prop, 
-                                   x = stage)) + 
-  geom_bar(position="stack") +#, stat="identity") +
-  scale_fill_viridis_d(guide = "none", na.value = "grey60") +
-  labs(x = "Maturity Stage", y = "Number of Individuals") +
+stage_comp_stacked <- ggplot(stage_comp,
+                            aes(fill = agg, y = prop,
+                                x = stage)) +
+  geom_bar(position="stack", stat="identity") +
+  scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
+                    type = "qual", palette = "Paired", guide = "none") +
+  labs(x = "Maturity Stage") +
   ggsidekick::theme_sleek() +
-    theme(axis.title.y = element_blank())
+  theme(axis.title.y = element_blank())
+
 
 
 p1 <- cowplot::plot_grid(
-  origin_count_stacked, stage_count_stacked,
+  origin_comp_stacked, stage_comp_stacked,
   ncol = 2
 )
-# y_grob <- grid::textGrob("Number of Individuals", 
-#                          rot = 90)
-# gridExtra::grid.arrange(
-#   gridExtra::arrangeGrob(p1, left = y_grob))
-
-# p2 <- cowplot::plot_grid(
-#   month_comp_stacked, p1, nrow = 2
-# )
+y_grob <- grid::textGrob("Proportion of Stock Composition",
+                         rot = 90)
+p2 <- cowplot::plot_grid(
+  month_comp_stacked, p1, nrow = 2
+)
 
 png(here::here("figs", "ms_figs", "stock_comp.png"), res = 250, units = "in", 
     height = 5.5, width = 5.5)
-# gridExtra::grid.arrange(
-#   gridExtra::arrangeGrob(p2, left = y_grob))
-cowplot::plot_grid(
-  month_comp_stacked, p1, nrow = 2
-)
+gridExtra::grid.arrange(
+  gridExtra::arrangeGrob(p2, left = y_grob))
+# cowplot::plot_grid(
+#   month_comp_stacked, p1, nrow = 2
+# )
 dev.off()
 
 
 # CONDITION --------------------------------------------------------------------
 
 chin <- readRDS(here::here("data", "clean_catch.RDS"))
-chin$agg2 <- str_replace(chin$agg, " ", "\n")
+chin$agg2 <- str_replace(chin$agg, " ", "\n") %>% 
+  fct_reorder(., as.numeric(chin$agg))
 
 length_hist <- ggplot(chin, aes(x = fl, fill = stage)) +
   geom_histogram(col=I("black")) +
@@ -761,12 +766,13 @@ new_stock <- expand.grid(
   stage = unique(chin$stage),
   origin = unique(chin$origin),
   # since predicting only on fixed effects factor levels don't matter
-  agg = unique(chin$agg),
+  agg = levels(chin$agg),
   year = "2022",
   fl = mean_fl
 ) %>% 
   filter(stage == "mature", origin == "hatchery", !is.na(agg)) 
-new_stock$agg2 <- str_replace(new_stock$agg, " ", "\n")
+new_stock$agg2 <- str_replace(new_stock$agg, " ", "\n") %>% 
+  fct_reorder(., as.numeric(new_stock$agg))
 
 fl_preds_agg <- predict(
   fit_fl, newdata = new_stock, se.fit = TRUE,
@@ -797,7 +803,7 @@ fl_agg <- ggplot(new_dat3) +
     aes(x = agg2, y = pred_fl, ymin = lo_fl, ymax = up_fl, fill = agg2),
     shape = 21
   ) +
-  scale_fill_viridis_d(guide = "none") +
+  scale_fill_brewer(type = "qual", palette = "Paired", guide = "none") +
   labs(y = "Predicted Fork Length") +
   ggsidekick::theme_sleek() +
   theme(
