@@ -9,9 +9,11 @@ library(tidyverse)
 
 ## CLEAN -----------------------------------------------------------------------
 
-# Import stage data and fitted model generated in gen_detection_histories.R
+# Import stage data and fitted model generated in estimate_stage.R
 stage_dat <- readRDS(here::here("data", "agg_lifestage_df.RDS")) %>% 
-  dplyr::select(vemco_code, stage) 
+  dplyr::select(vemco_code, stage) %>% 
+  filter(!is.na(vemco_code)) %>% 
+  distinct()
 
 # Import PBT tagging rate; define as high probability greater than 80% coverage
 pbt_rate <- readRDS(here::here("data", "mean_pbt_rate.rds")) %>% 
@@ -54,7 +56,8 @@ chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
                       "Fraser Year.") & 
         genetic_source == "GSI" & 
         !(stock %in% pbt_rate$stock) ~ "wild",
-      # mass marking common for all OR and WA stocks
+      # mass marking common for all OR and WA stocks, except Hanford Reach
+      stock == "HANFORD_REACH" ~ "unknown",
       agg_name %in% c("Puget Sound", "Up Col.","Low Col.", "WA_OR") &
         clip == "N" ~  "wild",
       TRUE ~ "unknown"
