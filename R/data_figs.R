@@ -16,8 +16,8 @@ stage_dat <- readRDS(here::here("data", "agg_lifestage_df.RDS")) %>%
   distinct()
 
 # Import PBT tagging rate; define as high probability greater than 80% coverage
-pbt_rate <- readRDS(here::here("data", "mean_pbt_rate.rds")) %>% 
-  select(stock = collection_extract, brood_year = year, tag_rate)
+pbt_rate <- readRDS(here::here("data", "mean_pbt_rate.rds")) %>%
+  dplyr::select(stock = collection_extract, brood_year = year, tag_rate)
 
 
 chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
@@ -130,11 +130,19 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
     ),
     stage = fct_relevel(
       stage, "mature", "immature"
+    ),
+    genetic_source = ifelse(
+      !is.na(vemco_code) & !is.na(agg) & is.na(agg_prob),
+      "tag_detections",
+      genetic_source
+    ),
+    agg_prob = ifelse(
+      genetic_source == "tag_detections", 100, agg_prob
     )
     ) %>% 
   dplyr::select(
     fish, vemco_code, event, date, year, month, year_day, deployment_time,
-    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg
+    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg, agg_prob
   ) 
 
 # summary of sample sizes
@@ -217,7 +225,8 @@ saveRDS(catch_size, here::here("data", "catch_size_pre.rds"))
 catch_stock1 <- chin  %>% 
   filter(
     !is.na(agg),
-    size_bin %in% c("large", "medium")
+    size_bin %in% c("large", "medium"),
+    !agg_prob < 80
   ) %>%
   group_by(event, agg) %>%
   summarize(catch = n(), .groups = "drop") %>%
