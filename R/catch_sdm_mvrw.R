@@ -275,6 +275,7 @@ fit_origin <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_origin.rds"))
 fit_list <- list(fit_size, fit_stock, fit_origin)
 names(fit_list) <- c("size", "stock", "origin")
 
+
 ## SIMULATION CHECKS -----------------------------------------------------------
 
 qq_list <- purrr::map2(
@@ -560,6 +561,7 @@ omegas <- purrr::map(
     distinct() %>% 
     plot_map(., omega_s) +
     scale_fill_gradient2(name = "Spatial\nRF Effect") +
+    # facet_grid(month~bin) +
     theme(legend.position = "top") 
 )
 
@@ -568,7 +570,7 @@ epsilons <- purrr::map(
   ~ .x %>% 
     plot_map(., upsilon_stc) +
     scale_fill_gradient2(name = "Spatial\nRF Effect") +
-    facet_grid(month~bin) +
+    facet_grid(bin ~ month) +
     theme(legend.position = "top") 
   )
 
@@ -580,7 +582,7 @@ full_preds <- purrr::map(
     left_join(., week_key, by = "week") %>% 
     plot_map(., scale_est) +
     scale_fill_viridis_c(trans = "sqrt", name = "Scaled\nAbundance") +
-    facet_grid(date~bin)  +
+    facet_grid(bin ~ date)  +
     theme(legend.position = "top",
           legend.key.size = unit(.85, 'cm')) 
 )
