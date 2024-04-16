@@ -11,7 +11,7 @@ library(tidyverse)
 
 # Import stage data and fitted model generated in estimate_stage.R
 stage_dat <- readRDS(here::here("data", "agg_lifestage_df.RDS")) %>% 
-  dplyr::select(vemco_code, stage) %>% 
+  dplyr::select(vemco_code, stage = stage_predicted) %>% 
   filter(!is.na(vemco_code)) %>% 
   distinct()
 
@@ -25,7 +25,7 @@ chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
     year_day = lubridate::yday(date),
     fw_age = ifelse(
       cu %in% c("CACV-Sp", "STh-1.3", "NTh-sum", "MFR-summer", "MFR-spring",
-                "UFR-spring"),
+                "UFR-spring", "LTh"),
       2,
       1
     ),
@@ -36,6 +36,7 @@ chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
       TRUE ~ stock
     ),
     # brood year equals FW age plus ocean age (3 for large, 2 medium/small)
+    # based on proportional age in bin figure from clean_age_data.R
     brood_year = ifelse(
       size == "large", year - 3 - fw_age, year - 2 - fw_age
     )
