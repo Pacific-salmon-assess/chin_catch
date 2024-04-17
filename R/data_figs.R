@@ -9,11 +9,14 @@ library(tidyverse)
 
 ## CLEAN -----------------------------------------------------------------------
 
-# Import stage data and fitted model generated in estimate_stage.R
+# Import stage data (excludes estimates for non-acoustic tagged fish) and 
+# fitted model generated in estimate_stage.R
 stage_dat <- readRDS(here::here("data", "agg_lifestage_df.RDS")) %>% 
-  dplyr::select(vemco_code, stage = stage_predicted) %>% 
+  dplyr::select(vemco_code, stage) %>% 
   filter(!is.na(vemco_code)) %>% 
   distinct()
+stage_mod <- readRDS(here::here("data", "stage_fl_hierA.RDS"))
+
 
 # Import PBT tagging rate; define as high probability greater than 80% coverage
 pbt_rate <- readRDS(here::here("data", "mean_pbt_rate.rds")) %>%
@@ -69,7 +72,7 @@ chin_raw <- readRDS(here::here("data", "cleanTagData_GSI.RDS")) %>%
 
 
 ## predict life stage based on fitted model 
-stage_mod <- readRDS(here::here("data", "stage_fl_hierA.RDS"))
+
 # include RIs when stock ID is known
 pred_dat <- tidybayes::add_epred_draws(
   object = stage_mod,
@@ -100,20 +103,13 @@ fl_preds_mean <- rbind(pred_dat, pred_dat_na) %>%
 
 chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>% 
   mutate(
-    stage = ifelse(is.na(stage) | stage == "unknown", 
-                   stage_predicted,
-                   # paste("predicted", stage_predicted, sep = "_"),
-                   stage),
+    stage = ifelse(
+      is.na(stage) | stage == "unknown", 
+      stage_predicted,
+      stage
+    ),
     month = lubridate::month(date),
     year = as.factor(year),
-    # mu = case_when(
-    #   agg_name %in% c("WCVI", "ECVI") ~ agg_name,
-    #   cu == "LFR-fall" ~ "Fraser\nFall",
-    #   cu == "LTh" ~ "Fraser\nSpr. 1.2",
-    #   cu %in% c("MFR-summer", "NTh-sum", "STh-1.3") ~ "Fraser\nSum. 1.3",
-    #   cu %in% c("STh-0.3", "STh-SHUR") ~ "Fraser\nSum. 0.3",
-    #   TRUE ~ cu
-    # ),
     size_bin = case_when(
       fl < 65 ~ "small",
       fl >= 65 & fl < 75 ~ "medium",
@@ -179,7 +175,11 @@ sun_data <- data.frame(date = as.Date(set_dat1$date_time_local),
 temp <- suncalc::getSunlightTimes(data = sun_data,
                                   keep = c("sunrise", "sunset"),
                                   tz = "America/Los_Angeles") %>% 
-  mutate(time_since_sunrise = difftime(date, sunrise,  tz = "America/Los_Angeles", units = "hours"))
+  mutate(
+    time_since_sunrise = difftime(
+      date, sunrise,  tz = "America/Los_Angeles", units = "hours"
+      )
+    )
 set_dat <- set_dat1 %>% 
   mutate(
     sunrise = temp$sunrise,
@@ -187,8 +187,9 @@ set_dat <- set_dat1 %>%
       date_time_local, sunrise, tz = "America/Los_Angeles", units = "hours"
     ) %>% 
       as.numeric(),
-    time_since_sunrise = ifelse(time_since_sunrise < 0, time_since_sunrise * -1, 
-                                time_since_sunrise)
+    time_since_sunrise = ifelse(
+      time_since_sunrise < 0, time_since_sunrise * -1, time_since_sunrise
+      )
   )
 
 
@@ -320,7 +321,6 @@ full_comp_stacked <- ggplot(full_comp,
   labs(y = "Proportion Stock Composition", x = "Size Class") +
   ggsidekick::theme_sleek()
 
-
 # stock composition by month
 month_comp <- chin %>%
   group_by(month) %>%
@@ -382,6 +382,25 @@ stage_comp_stacked <- ggplot(stage_comp,
   theme(axis.title.y = element_blank())
 
 
+# composition by year
+year_comp <- chin %>%
+  group_by(year) %>%
+  mutate(year_n = n()) %>%
+  ungroup() %>%
+  group_by(agg, year, year_n) %>%
+  tally() %>%
+  mutate(prop = n / year_n)
+
+year_comp_stacked <- ggplot(year_comp,
+                             aes(fill = agg, y = prop,
+                                 x = as.factor(year))) +
+  geom_bar(position="stack", stat="identity") +
+  scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
+                    type = "qual", palette = "Paired") +
+  labs(x = "Maturity Stage") +
+  ggsidekick::theme_sleek() +
+  theme(axis.title.y = element_blank())
+
 
 p1 <- cowplot::plot_grid(
   origin_comp_stacked, stage_comp_stacked,
@@ -397,9 +416,6 @@ png(here::here("figs", "ms_figs", "stock_comp.png"), res = 250, units = "in",
     height = 5.5, width = 5.5)
 gridExtra::grid.arrange(
   gridExtra::arrangeGrob(p2, left = y_grob))
-# cowplot::plot_grid(
-#   month_comp_stacked, p1, nrow = 2
-# )
 dev.off()
 
 
@@ -413,7 +429,7 @@ length_hist <- ggplot(chin, aes(x = fl, fill = stage)) +
   geom_histogram(col=I("black")) +
   geom_vline(aes(xintercept = 65), linetype = 1) +
   geom_vline(aes(xintercept = 75), linetype = 2) +
-  scale_fill_viridis_d(option = "B") +
+  scale_fill_brewer(type = "div", palette = 5) +
   labs(x = "Fork Length") +
   ggsidekick::theme_sleek() +
   theme(axis.title.y = element_blank())
@@ -513,11 +529,12 @@ fit_lipid <- gam(
   family = Gamma(link = "log")
 )
 
+
 ## checks
-sim_lipid <- simulate(fit_lipid, newdata = chin_lipid, nsim = 50) %>% 
-  as.matrix()
+sim_lipid <- simulate(fit_lipid, data = chin_lipid, nsim = 50) %>% 
+  as.matrix() 
 fix_pred <- predict(fit_lipid, newdata = chin_lipid, type = "response") %>% 
-  as.numeric() 
+  as.numeric()
 dharma_res <- DHARMa::createDHARMa(
       simulatedResponse = sim_lipid,
       observedResponse = chin_lipid$lipid,
@@ -828,7 +845,7 @@ lipid_agg <- ggplot(new_dat3) +
     aes(x = agg2, y = pred_lipid, ymin = lo_lipid, ymax = up_lipid, fill = agg2),
     shape = 21
   ) +
-  scale_fill_viridis_d(guide = "none") +
+  scale_fill_brewer(type = "qual", palette = "Paired", guide = "none") +
   labs(y = "Predicted Lipid Content") +
   ggsidekick::theme_sleek() +
   theme(
