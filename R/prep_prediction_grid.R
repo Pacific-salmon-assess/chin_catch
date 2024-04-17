@@ -72,11 +72,14 @@ dep_dat_full <- dep_dat_f(dep_list) %>%
 # convert each to raster, downscale, and add terrain data to both
 # then convert back to dataframes
 bc_raster <- rasterFromXYZ(dep_dat_full, 
-                           crs = sf::st_crs("+proj=longlat +datum=WGS84"))
-bc_raster_utm <- projectRaster(bc_raster,
-                               crs = sf::st_crs("+proj=utm +zone=10 +units=m"),
-                               # convert to 1000 m resolution
-                               res = 1000)
+                           crs = "+proj=longlat +datum=WGS84")
+
+bc_raster_utm <- projectRaster(
+  bc_raster,
+  crs = "+proj=utm +zone=10 +units=m",
+  # convert to 1000 m resolution
+  res = 1000
+)
 
 plot(bc_raster_utm)
 plot(crit_hab, 
@@ -87,17 +90,35 @@ plot(crit_hab,
 # crop to survey grid
 # dum <- crop(bc_raster_utm, extent(ipes_grid_trim))
 # ipes_raster_utm <- mask(dum, ipes_grid_trim)
-dum <- crop(bc_raster_utm, extent(crit_hab))
+study_area_utm <- crop(bc_raster_utm, extent(crit_hab))
 ch_utm <- mask(dum, crit_hab)
 
 
 # merge and add aspect/slope
+study_area_slope <- terrain(
+  study_area_utm, opt = 'slope', unit = 'degrees',
+  neighbors = 8
+)
 ch_slope <- terrain(
   ch_utm, opt = 'slope', unit = 'degrees',
   neighbors = 8
 )
 
 # convert to SF
+study_area_sf_list <- purrr::map(
+  list(
+    depth = study_area_utm,
+    slope = study_area_slope
+  ),
+  function (x) {
+    # leave at 1km x 1km res for inlets
+    # aggregate(x, fact = 2) %>% 
+    as(x, 'SpatialPixelsDataFrame') %>%
+      as.data.frame() %>%
+      st_as_sf(., coords = c("x", "y"),
+               crs = sf::st_crs("+proj=utm +zone=10 +units=m"))
+  }
+)
 ch_sf_list <- purrr::map(
   list(
     depth = ch_utm,
@@ -115,6 +136,7 @@ ch_sf_list <- purrr::map(
 
 
 # join depth and slope data
+study_area_sf <- st_join(study_area_sf_list$depth, study_area_sf_list$slope) 
 ch_sf <- st_join(ch_sf_list$depth, ch_sf_list$slope) 
 
 
@@ -147,9 +169,15 @@ ch_grid <- data.frame(
   slope = ch_sf$slope,
   shore_dist = coast_dist[, "distance"]
 )
-
+study_grid <- data.frame(
+  st_coordinates(study_area_sf[ , 1]),
+  depth = study_area_sf$depth,
+  slope = study_area_sf$slope
+)
 
 # interpolate missing data 
+study_grid_interp <- VIM::kNN(study_grid, k = 5) %>% 
+  dplyr::select(-ends_with("imp"))
 ch_grid_interp <- VIM::kNN(ch_grid, k = 5) %>% 
   dplyr::select(-ends_with("imp"))
 
@@ -162,6 +190,8 @@ ggplot() +
 
 
 # export grid
+saveRDS(study_grid_interp,
+        here::here("data", "pred_bathy_grid_sa_1000m.RDS"))
 saveRDS(ch_grid_interp,
         here::here("data", "pred_bathy_grid_1000m.RDS"))
 saveRDS(coast_utm, here::here("data", "coast_trim_utm.RDS"))

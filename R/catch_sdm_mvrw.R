@@ -208,7 +208,7 @@ plot_foo <- function(dat_in, var_in = "week", x_lab = "Week",
 ## remove slack tide effects until 2023 data available
 
 fit_size <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin + #poly(slack_z, 2) +
+  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
     depth_z + poly(moon_z, 2) + sunrise_z +
     slope_z + poly(week_z, 2):bin,
   offset = "offset",

@@ -68,7 +68,8 @@ chin_age2 <- chin_age %>%
   ungroup() %>% 
   group_by(size_bin, ocean_age, nn) %>%
   tally() %>%
-  mutate(prop = n / nn) 
+  mutate(prop = n / nn,
+         size_bin = factor(size_bin, levels = c("small", "medium", "large"))) 
 as_2 <- ggplot() +
   geom_bar(data = chin_age2, aes(x = size_bin, y = prop, fill = ocean_age),
            position="stack", stat="identity") +
