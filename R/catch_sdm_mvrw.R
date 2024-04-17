@@ -229,8 +229,8 @@ fit_size <- sdmTMB(
 # CONSIDER MORE COMPLEX MODEL (2 slack/moon included)
 # interaction with mig not supported by AIC (delta < 2)
 fit_stock <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
-    depth_z + sunrise_z +# poly(moon_z, 2) +
+  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
+    depth_z + sunrise_z + poly(moon_z, 2) +
     slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[2]],
@@ -247,8 +247,8 @@ fit_stock <- sdmTMB(
 
 
 fit_origin <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin +# poly(slack_z, 2) +
-    depth_z + #poly(moon_z, 2) +
+  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
+    depth_z + poly(moon_z, 2) +
     slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[3]],
