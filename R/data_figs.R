@@ -135,11 +135,15 @@ chin <- left_join(chin_raw, fl_preds_mean, by = "fish") %>%
     ),
     agg_prob = ifelse(
       genetic_source == "tag_detections", 100, agg_prob
-    )
+    ),
+    # scale covariates in GAM so main effects interpretable
+    fl_z = scale(fl)[ , 1],
+    year_day_z = scale(year_day)[ , 1]
     ) %>% 
   dplyr::select(
     fish, vemco_code, event, date, year, month, year_day, deployment_time,
-    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg, agg_prob
+    fl, size_bin, lipid, origin, genetic_source, stage, stock, cu, agg, agg_prob,
+    fl_z, year_day_z
   ) 
 
 # summary of sample sizes
@@ -504,9 +508,9 @@ chin_fl <- chin %>%
          !is.na(agg))
 
 fit_fl <- gam(
-  fl ~ s(year_day, bs = "tp", m = 2, k = 4) + 
-    s(year_day, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
-    s(year_day, by = agg, bs = "tp", m = 1, k = 4) +  
+  fl ~ s(year_day_z, bs = "tp", m = 2, k = 4) + 
+    s(year_day_z, by = stage, bs = "tp", m = 1, k = 4) + stage + origin + 
+    s(year_day_z, by = agg, bs = "tp", m = 1, k = 4) +  
     s(agg, bs = "re") + s(year, bs = "re"),
   data = chin_fl,
   method = "REML"
@@ -517,12 +521,12 @@ chin_lipid <- chin %>%
          !is.na(agg))
 
 fit_lipid <- gam(
-  lipid ~ s(fl, bs = "tp", m = 2, k = 4) + 
-    s(fl, by = agg, bs = "tp", m = 1, k = 4) +  
-    s(year_day, bs = "tp", m = 2, k = 4) + 
-    s(year_day, by = stage, bs = "tp", m = 1, k = 4) +
+  lipid ~ s(fl_z, bs = "tp", m = 2, k = 4) + 
+    s(fl_z, by = agg, bs = "tp", m = 1, k = 4) +  
+    s(year_day_z, bs = "tp", m = 2, k = 4) + 
+    s(year_day_z, by = stage, bs = "tp", m = 1, k = 4) +
     stage + origin + 
-    s(year_day, by = agg, bs = "tp", m = 1, k = 4) +  
+    s(year_day_z, by = agg, bs = "tp", m = 1, k = 4) +  
     s(agg, bs = "re") + s(year, bs = "re"),
   data = chin_lipid,
   method = "REML",
@@ -633,33 +637,36 @@ fl_stage <- chin %>%
   filter(stage == "mature") %>%
   # group_by(stage) %>% 
   summarize(
-    fl = mean(fl, na.rm = T)
+    fl_z = mean(fl_z, na.rm = T)
   ) 
 
 # yday preds
 new_yday <- expand.grid(
   year_day = seq(120, 260, by = 5),
-  stage = unique(chin$stage),
-  origin = unique(chin$origin),
+  # year_day_z = 0,
+  stage = levels(chin$stage),
+  origin = levels(chin$origin),
   # since predicting only on fixed effects factor levels don't matter
   agg = "ECVI",
   year = "2022",
-  fl = fl_stage$fl
-) 
+  fl_z = fl_stage$fl_z
+) %>% 
+  mutate(
+    year_day_z = (year_day - mean(chin$year_day)) / sd(chin$year_day)
+  )
 
+smooths_fl <- gratia::smooths(fit_fl)
 fl_preds <- predict(
   fit_fl, newdata = new_yday, se.fit = TRUE,
   # include only FE terms
-  terms = c("(Intercept)", "stageimmature", "originwild", "originunknown",
-            "s(year_day)", "s(year_day):stagemature", 
-            "s(year_day):stageimmature")
+  exclude = smooths_fl[(grepl("agg", smooths_fl) | smooths_fl == "s(year)")]
 )
+smooths_lipid <- gratia::smooths(fit_lipid)
 lipid_preds_yday <- predict(
   fit_lipid, newdata = new_yday, se.fit = TRUE, type = "response",
   # include only FE terms
-  terms = c("(Intercept)", "stageimmature", "originwild", "originunknown",
-            "s(year_day)", "s(year_day):stagemature", 
-            "s(year_day):stageimmature", "s(fl)")
+  exclude = smooths_lipid[(grepl("agg", smooths_lipid) | 
+                              smooths_lipid == "s(year)")]
 )
 
 new_dat <- new_yday %>% 
@@ -722,9 +729,6 @@ yday_plots1 <- cowplot::plot_grid(
     theme(legend.position = "none"),
   ncol = 2
 )
-# x_grob_yday <- grid::textGrob("Date")
-# yday_plots2 <- gridExtra::grid.arrange(
-#   gridExtra::arrangeGrob(yday_plots1, bottom = x_grob_yday))
 
 png(here::here("figs", "ms_figs", "yday_smooths.png"), res = 250, units = "in",
     height = 3.5, width = 6.5)
@@ -746,15 +750,17 @@ new_fl <- expand.grid(
   # since predicting only on fixed effects factor levels don't matter
   agg = "ECVI",
   year = "2022",
-  year_day = mean(chin$year_day)
-) 
+  year_day_z = 0
+) %>% 
+  mutate(
+    fl_z = (fl - mean(chin$fl)) / sd(chin$fl)
+  )
 
 lipid_preds_fl <- predict(
   fit_lipid, newdata = new_fl, se.fit = TRUE, type = "response",
   # include only FE terms
-  terms = c("(Intercept)", "stageimmature", "originwild", "originunknown",
-            "s(year_day)", "s(year_day):stagemature", 
-            "s(fl)")
+  exclude = smooths_lipid[(grepl("agg", smooths_lipid) | 
+                             smooths_lipid == "s(year)")]
 )
 
 new_dat2 <- new_fl %>% 
@@ -788,17 +794,17 @@ dev.off()
 mean_fl <- chin %>% 
   filter(stage == "mature") %>% 
   summarize(
-    fl = mean(fl, na.rm = T)
+    fl_z = mean(fl_z, na.rm = T)
   ) %>% 
-  pull(fl)
+  pull(fl_z)
 new_stock <- expand.grid(
-  year_day = mean(chin$year_day),
+  year_day_z = mean(chin$year_day_z),
   stage = unique(chin$stage),
   origin = unique(chin$origin),
   # since predicting only on fixed effects factor levels don't matter
   agg = levels(chin$agg),
   year = "2022",
-  fl = mean_fl
+  fl_z = mean_fl
 ) %>% 
   filter(stage == "mature", origin == "hatchery", !is.na(agg)) 
 new_stock$agg2 <- str_replace(new_stock$agg, " ", "\n") %>% 
