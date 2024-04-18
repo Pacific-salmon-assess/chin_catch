@@ -28,7 +28,9 @@ catch_size <- catch_size1 %>%
   # remove sets not on a troller and tacking
   filter(!grepl("rec", event),
          !tack == "yes") %>% 
-  mutate(bin = as.factor(size_bin))
+  mutate(
+    bin = factor(size_bin, levels = c("sublegal", "small", "medium", "large"))
+    )
 
 
 ## prep stock data (small individuals already removed)
@@ -40,7 +42,13 @@ catch_stock <- catch_stock1 %>%
          !grepl("rec", event),
          !tack == "yes") %>% 
   mutate(
-    bin = as.factor(agg),
+    bin = factor(
+      agg, 
+      levels = c(
+        "WCVI", "ECVI", "Fraser Year.", "Fraser 4.1", "Fraser Fall", 
+        "Puget Sound", "Low Col.", "Up Col.", "WA_OR", "Cali"
+      )
+    ),
     mig = ifelse(
       agg %in% c("Fraser Fall", "Puget Sound", "Low Col."), "res", "mig")
   ) %>% 
@@ -162,15 +170,27 @@ week_key <- data.frame(
 
 # HELPER FUNCTIONS -------------------------------------------------------------
 
+crop_coast <- readRDS(here::here("data", "crop_coast_sf.RDS")) %>% 
+  sf::st_crop(., xmin = -126.3, ymin = 48.45, xmax = -125.1, ymax = 49) %>% 
+  sf::st_transform(., crs = sf::st_crs("+proj=utm +zone=10 +units=m"))
+crop_coast_coords <- sf::st_coordinates(crop_coast)
+
 plot_map <- function(dat, column) {
   ggplot() +
+    geom_sf(data = crop_coast) +
     geom_raster(data = dat, aes(X, Y, fill = {{ column }})) +
-    coord_fixed() +
+    # coord_fixed() +
     ggsidekick::theme_sleek() +
     theme(
       axis.text = element_blank(),
       axis.title = element_blank()
-    )
+    ) +
+    scale_x_continuous(limits = c(min(crop_coast_coords[ , "X"]) + 2500, 
+                                  max(crop_coast_coords[ , "X"]) - 5000), 
+                       expand = c(0, 0)) +
+    scale_y_continuous(limits = c(min(crop_coast_coords[ , "Y"]) + 4500, 
+                                  max(crop_coast_coords[ , "Y"]) - 2500), 
+                       expand = c(0, 0))
 }
 
 pred_foo <- function(x = "week", nd, fit) {
@@ -278,14 +298,28 @@ names(fit_list) <- c("size", "stock", "origin")
 
 ## SIMULATION CHECKS -----------------------------------------------------------
 
-qq_list <- purrr::map2(
-  fit_list,
-  dat_tbl$data,
-  function(x, y) {
-    simulate(x, nsim = 100, newdata = y) %>% 
-      dharma_residuals(x)
+qq_list <- purrr::pmap(
+  list(fit_list, dat_tbl$data, names(fit_list)),
+  function(x, y, tit) {
+    r <- simulate(x, nsim = 100, newdata = y) %>% 
+      dharma_residuals(x, plot = FALSE)
+    ggplot(r) +
+      geom_point(aes(x = expected, y = observed)) +
+      labs(
+        title = tit, x = "Predicted", y = "Observed"
+      ) +
+      geom_abline(aes(intercept = 0, slope = 1)) +
+      ggsidekick::theme_sleek()
   }
 )
+
+png(here::here("figs", "ms_figs", "qq_plot.png"), res = 250, units = "in", 
+    height = 4.5, width = 7.5)
+cowplot::plot_grid(
+  qq_list[[1]], qq_list[[2]], qq_list[[3]], ncol = 1
+)
+dev.off()
+
 
 # spatiotemporal resolution of fits
 resid_plots <- purrr::map2(
@@ -323,6 +357,19 @@ dat_tbl$fes <- purrr::map2(
       exp_hi = exp(conf.high)
     ) 
 )
+# reorder to match original dataset
+dat_tbl$fes[[1]] <- dat_tbl$fes[[1]] %>% 
+  mutate(
+    term = factor(term, levels = levels(dat_tbl$data[[1]]$bin))
+  )
+dat_tbl$fes[[2]] <- dat_tbl$fes[[2]] %>% 
+  mutate(term = factor(
+    term, 
+    levels = c(
+      "WCVI", "Fraser 4.1", "Fraser Fall",  "Puget Sound", "Low Col.",
+      "Up Col.", "WA_OR", "Cali"
+    ))
+  )
 dat_tbl$fes[[3]] <- dat_tbl$fes[[3]] %>% 
   mutate(term = fct_relevel(term, "unknown", after = Inf))
 dat_tbl$res <- purrr::map2(
@@ -352,7 +399,7 @@ purrr::map2(
   fit_list,
   dat_tbl$dataset,
   ~ tidy(.x, effects = "fixed", conf.int = T) %>% 
-    filter(term %in% c("depth_z", "slope_z")) %>% 
+    filter(!grepl("bin", term)) %>%
     mutate(dataset = .y)
 ) %>% 
   bind_rows()
@@ -368,7 +415,7 @@ dat_tbl$week_preds <- purrr::map2(
       week_z = seq(-2, 2, length = 30),
       month = 7,
       sunrise_z = 0,
-      # slack_z = 0,
+      slack_z = 0,
       moon_z = 0,
       bin = unique(x$bin),
       depth_z = 0,
@@ -451,12 +498,12 @@ nd_slope <- nd_depth %>%
 p_slope <- pred_foo(x = "slope", nd = nd_slope, fit = fit_size)
 
 # fixed slack effects
-# nd_slack <- nd_depth %>% 
-#   mutate(
-#     slack_z = seq(-3, 3, length = 30),
-#     depth_z = 0
-#   )
-# p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit_size)
+nd_slack <- nd_depth %>%
+  mutate(
+    slack_z = seq(-3, 3, length = 30),
+    depth_z = 0
+  )
+p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit_size)
 
 # fixed lunar effects
 nd_moon <- nd_depth %>% 
@@ -475,15 +522,15 @@ nd_sunrise <- nd_depth %>%
 p_sunrise <- pred_foo(x = "sunrise", nd = nd_sunrise, fit = fit_size)
 
 
-full_p <- list(p_depth, p_slope, #p_slack, 
+full_p <- list(p_depth, p_slope, p_slack, 
                p_moon, p_sunrise) %>% 
   do.call(rbind, .) %>%
   group_by(variable) %>% 
   mutate(
     depth = (depth_z * sd(catch_size$mean_depth)) + mean(catch_size$mean_depth),
     slope = (slope_z * sd(catch_size$mean_slope)) + mean(catch_size$mean_slope),
-    # slack = (slack_z * sd(catch_size$hours_from_slack)) +
-    #   mean(catch_size$hours_from_slack),
+    slack = (slack_z * sd(catch_size$hours_from_slack)) +
+      mean(catch_size$hours_from_slack),
     moon = (moon_z * sd(catch_size$moon_illuminated)) +
       mean(catch_size$moon_illuminated),
     sunrise = (sunrise_z * sd(catch_size$time_since_sunrise)) +
@@ -506,9 +553,9 @@ depth_plot <- plot_foo(dat_in  = full_p, var_in = "depth",
 slope_plot <- plot_foo(dat_in  = full_p, var_in = "slope", 
                        x_lab = "Bottom Slope (degrees)", col_in = size_main) +
   theme(axis.title.y = element_blank())
-# slack_plot <- plot_foo(dat_in  = full_p, var_in = "slack", 
-#                        x_lab = "Hours From Slack", col_in = size_main) +
-#   theme(axis.title.y = element_blank())
+slack_plot <- plot_foo(dat_in  = full_p, var_in = "slack",
+                       x_lab = "Hours From Slack", col_in = size_main) +
+  theme(axis.title.y = element_blank())
 moon_plot <- plot_foo(dat_in  = full_p, var_in = "moon", 
                       x_lab = "Proportion Moon Illuminated",
                       col_in = size_main) +
@@ -519,14 +566,14 @@ sunrise_plot <- plot_foo(dat_in  = full_p, var_in = "sunrise",
   theme(axis.title.y = element_blank())
 
 p1 <- cowplot::plot_grid(
-  depth_plot, slope_plot, #slack_plot, 
+  depth_plot, slope_plot, slack_plot, 
   moon_plot, sunrise_plot,
   ncol = 2
 )
 
 
 png(here::here("figs", "ms_figs", "size_other_fes.png"), res = 250, units = "in", 
-    height = 5.5, width = 5.5)
+    height = 6.5, width = 5.5)
 gridExtra::grid.arrange(
   gridExtra::arrangeGrob(
     p1, 
@@ -537,7 +584,6 @@ dev.off()
 
 
 ## SPATIAL PREDICTIONS ---------------------------------------------------------
-
 
 spatial_preds <- purrr::map2(
   fit_list,
@@ -561,8 +607,8 @@ omegas <- purrr::map(
     distinct() %>% 
     plot_map(., omega_s) +
     scale_fill_gradient2(name = "Spatial\nRF Effect") +
-    # facet_grid(month~bin) +
-    theme(legend.position = "top") 
+    theme(legend.position = "top",
+          panel.background = element_rect(fill = "grey60")) 
 )
 
 epsilons <- purrr::map(
@@ -571,7 +617,8 @@ epsilons <- purrr::map(
     plot_map(., upsilon_stc) +
     scale_fill_gradient2(name = "Spatial\nRF Effect") +
     facet_grid(bin ~ month) +
-    theme(legend.position = "top") 
+    theme(legend.position = "top",
+          panel.background = element_rect(fill = "grey60")) 
   )
 
 full_preds <- purrr::map(
@@ -584,7 +631,8 @@ full_preds <- purrr::map(
     scale_fill_viridis_c(trans = "sqrt", name = "Scaled\nAbundance") +
     facet_grid(bin ~ date)  +
     theme(legend.position = "top",
-          legend.key.size = unit(.85, 'cm')) 
+          legend.key.size = unit(.85, 'cm'),
+          panel.background = element_rect(fill = "grey60"))
 )
 
 
