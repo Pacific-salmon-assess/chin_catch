@@ -22,6 +22,8 @@ knitr-cache
 .Rhistory
 .Rapp.history
 
+R/defunct/
+
 myNotes.*
 .Rproj.user/
 .Rproj.user
