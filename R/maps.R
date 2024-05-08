@@ -45,7 +45,7 @@ coast_trim <- sf::st_crop(
   coast,
   xmin = -128.5, ymin = 48, xmax = -122.5, ymax = 51.5
 ) %>% 
-  sf::st_transform(., crs = sf::st_crs("+proj=utm +zone=10 +units=m"))
+  sf::st_transform(., crs = sf::st_crs("+proj=utm +zone=10 +units=m")) 
 
 # pull coordinates to fix projection
 coast_coords <- sf::st_coordinates(coast_trim)
@@ -84,25 +84,37 @@ sets_only <- ggplot() +
   geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
   geom_point(data = sets, aes(x = xUTM, y = yUTM, fill = as.factor(year)),
              inherit.aes = FALSE, alpha = 0.4, shape = 21) +
-  geom_contour(data = bath_grid %>% 
-                 filter(depth < 401), 
-               aes(x = X, y = Y, z = depth), 
+  geom_contour(data = bath_grid %>%
+                 filter(depth < 401),
+               aes(x = X, y = Y, z = depth),
                breaks = seq(50, 400, by = 50),
                colour = "black") +
   ggsidekick::theme_sleek() +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) +
-  scale_fill_discrete(guide = "none") +
+  scale_fill_viridis_d(name = "Sampling\nYear") +
   theme(axis.title = element_blank(),
         legend.title = element_blank(),
         axis.text = element_blank(),
         panel.background = element_rect(fill = "grey60")) +
-  scale_x_continuous(limits = c(min(crop_coast_coords[ , "X"]) + 2500, 
-                                max(crop_coast_coords[ , "X"]) - 5000), 
+  scale_x_continuous(limits = c(min(crop_coast_coords[ , "X"]) + 2500,
+                                max(crop_coast_coords[ , "X"]) - 5000),
                      expand = c(0, 0)) +
-  scale_y_continuous(limits = c(min(crop_coast_coords[ , "Y"]) + 4500, 
-                                max(crop_coast_coords[ , "Y"]) - 2500), 
-                     expand = c(0, 0))
+  scale_y_continuous(limits = c(min(crop_coast_coords[ , "Y"]) + 4500,
+                                max(crop_coast_coords[ , "Y"]) - 2500),
+                     expand = c(0, 0)) +
+  ggsn::north(crop_coast, symbol = 15, location = "bottomright", #scale = 0.09,
+              anchor = c(
+                x = max(crop_coast_coords[ , "X"]) - 10500,
+                y = min(crop_coast_coords[ , "Y"]) + 13000
+              )) +
+  ggsn::scalebar(crop_coast, dist_unit = "km", dist = 10, st.size = 2, 
+                 anchor = c(
+                   x = max(crop_coast_coords[ , "X"]),
+                   y = min(crop_coast_coords[ , "Y"]) + 9000
+                 ),
+                 transform = FALSE, location = "bottomright")
+
 
 
 png(here::here("figs", "ms_figs", "study_area1.png"), res = 250, units = "in", 
