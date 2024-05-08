@@ -5,6 +5,6 @@ Data and code associated with estimates of Chinook salmon condition and spatiote
 Scripts:
 1. maps.R: generate study area and raw catch maps
 2. data_figs.R: data cleaning, composition and individual condition figures, individual condition GAMs
-3. catch_sdm_mvrw.R: 
-4. par_recovery_sim.R: simulation exercise to evaluate recovery of fitted parameters
+3. catch_sdm_mvrw.R: spatiotemporal models for different ecological groups
+4. prep_prediction_grid.R: prepare predictive grid for spatiotemporal models
 
