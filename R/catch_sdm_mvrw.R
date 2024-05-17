@@ -225,7 +225,10 @@ plot_foo <- function(dat_in, var_in = "week", x_lab = "Week",
 
 # FIT MODELS -------------------------------------------------------------------
 
-## remove slack tide effects until 2023 data available
+if (!dir.exists(here::here("data", "model_fits", "fit_mvrfrw_size.rds"))) {
+  dir.create(here::here("data", "model_fits"), recursive = TRUE)
+}
+
 
 fit_size <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
@@ -246,8 +249,6 @@ fit_size <- sdmTMB(
 )
 
 
-# CONSIDER MORE COMPLEX MODEL (2 slack/moon included)
-# interaction with mig not supported by AIC (delta < 2)
 fit_stock <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
     depth_z + sunrise_z + poly(moon_z, 2) +
@@ -268,7 +269,7 @@ fit_stock <- sdmTMB(
 
 fit_origin <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
-    depth_z + poly(moon_z, 2) +
+    depth_z + poly(moon_z, 2) + sunrise_z +
     slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[3]],
@@ -301,24 +302,39 @@ names(fit_list) <- c("size", "stock", "origin")
 qq_list <- purrr::pmap(
   list(fit_list, dat_tbl$data, names(fit_list)),
   function(x, y, tit) {
-    r <- simulate(x, nsim = 100, newdata = y) %>% 
-      dharma_residuals(x, plot = FALSE)
-    ggplot(r) +
-      geom_point(aes(x = expected, y = observed)) +
-      labs(
-        title = tit, x = "Predicted", y = "Observed"
-      ) +
-      geom_abline(aes(intercept = 0, slope = 1)) +
-      ggsidekick::theme_sleek()
+    pred_fixed <- x$family$linkinv(predict(x)$est_non_rf)
+    r <- simulate(x, nsim = 100, newdata = y)# %>% 
+      # sdmTMBextra::dharma_residuals(x, plot = FALSE)
+    DHARMa::createDHARMa(
+      simulatedResponse = r,
+      observedResponse = y$catch,
+      fittedPredictedResponse = pred_fixed
+    )
+    # ggplot(r) +
+    #   geom_point(aes(x = expected, y = observed)) +
+    #   labs(
+    #     title = tit, x = "Predicted", y = "Observed"
+    #   ) +
+    #   geom_abline(aes(intercept = 0, slope = 1)) +
+    #   ggsidekick::theme_sleek()
   }
 )
 
-png(here::here("figs", "ms_figs", "qq_plot.png"), res = 250, units = "in", 
+png(here::here("figs", "ms_figs", "qq_plot_size.png"), res = 250, units = "in", 
     height = 4.5, width = 7.5)
-cowplot::plot_grid(
-  qq_list[[1]], qq_list[[2]], qq_list[[3]], ncol = 1
-)
+plot(qq_list[[1]], title = "Size Model")
 dev.off()
+
+png(here::here("figs", "ms_figs", "qq_plot_stock.png"), res = 250, units = "in", 
+    height = 4.5, width = 7.5)
+plot(qq_list[[2]], title = "Stock Model")
+dev.off()
+
+png(here::here("figs", "ms_figs", "qq_plot_origin.png"), res = 250, units = "in", 
+    height = 4.5, width = 7.5)
+plot(qq_list[[3]], title = "Origin Model")
+dev.off()
+
 
 
 # spatiotemporal resolution of fits
@@ -395,15 +411,21 @@ int_plots <- purrr::map2(
 )
 
 # slope estimates (supp table)
-purrr::map2(
+supp_table2 <- purrr::map2(
   fit_list,
   dat_tbl$dataset,
   ~ tidy(.x, effects = "fixed", conf.int = T) %>% 
     filter(!grepl("bin", term)) %>%
     mutate(dataset = .y)
 ) %>% 
-  bind_rows()
-  
+  bind_rows() %>% 
+  mutate(dataset = factor(dataset, levels = c("size", "stock", "origin"))) %>% 
+  arrange(term, dataset)
+write.csv(supp_table2,
+          here::here(
+            "data", "supp_par_est.csv"
+          ),
+          row.names = FALSE)
 
 
 dat_tbl$week_preds <- purrr::map2(
