@@ -37,6 +37,15 @@ chin_age <- chin %>%
     ocean_age = gsub("^.*\\.", "", european_age)
   )
 
+write.csv(
+  chin_age %>% 
+    select(fl, year, stock, stock_aggregate = agg_name, fw_age, ocean_age),
+  here::here(
+    "data", "aging_data", "cleaned_age_estimates.csv"
+  ),
+  row.names = FALSE
+)
+
 labs <- chin_age %>% 
   group_by(ocean_age, fw_age) %>% 
   tally()
