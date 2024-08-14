@@ -170,7 +170,8 @@ set_dat1 <- readRDS(here::here("data", "cleanSetData.RDS")) %>%
     ),
     month_f = month %>% 
       as.factor()
-  )
+  ) 
+  
 
 # add sunrise/sunset data
 sun_data <- data.frame(date = as.Date(set_dat1$date_time_local),

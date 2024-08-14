@@ -74,16 +74,19 @@ dat_tbl$data <- purrr::map(
   ~ .x %>% 
     mutate(
       year_f = as.factor(year),
-      yUTM_ds = yUTM / 1000,
-      xUTM_ds = xUTM / 1000,
+      yUTM_ds = yUTM,
+      xUTM_ds = xUTM,
+      yUTM = yUTM * 1000,
+      xUTM = xUTM * 1000,
       effort = (set_dist / 1000) * lines,
       offset = log((set_dist / 1000) * lines),
       # effort of one corresponds to ~2 lines towed for 500 m
       depth_z = scale(mean_depth)[ , 1],
       slope_z = scale(mean_slope)[ , 1],
       slack_z = scale(hours_from_slack)[ , 1],
+      tide_z = scale(tide_mag)[ , 1],
       week_z = scale(week)[ , 1],
-      moon_z = scale(moon_illuminated)[ , 1],
+      # moon_z = scale(moon_illuminated)[ , 1],
       dist_z = scale(coast_dist_km)[ , 1],
       sunrise_z = scale(time_since_sunrise)[ , 1]
     )
@@ -111,10 +114,12 @@ dat_tbl$mesh <- purrr::map(
 # import 1 x 1 km grid based on shrunk CH shape files and generated in 
 # prep_prediction_grid.R 
 pred_bathy_grid <- readRDS(
-  here::here("data", "pred_bathy_grid_1000m.RDS"))
+  here::here("data", "pred_bathy_grid_1000m.RDS")) 
 trim_grid <- pred_bathy_grid %>% 
-  filter(X < max(catch_size$xUTM + 1500) & X > min(catch_size$xUTM - 1500),
-         Y < max(catch_size$yUTM + 1500) & Y > min(catch_size$yUTM - 1500))
+  filter(X < max(dat_tbl$data[[1]]$xUTM + 1500) &
+           X > min(dat_tbl$data[[1]]$xUTM - 1500),
+         Y < max(dat_tbl$data[[1]]$yUTM + 1500) & 
+           Y > min(dat_tbl$data[[1]]$yUTM - 1500))
 
 
 # clean lists above
@@ -141,7 +146,7 @@ dat_tbl$pred_data <- purrr::map(
         yUTM_ds = Y / 1000,
         slack_z = 0,
         sunrise_z = 0,
-        moon_z = 0,
+        tide_z = 0,
         month = case_when(
           week < 23 ~ 5,
           week >= 23 & week < 27 ~ 6,
@@ -156,6 +161,9 @@ dat_tbl$pred_data <- purrr::map(
         ) 
   }
 )
+saveRDS(dat_tbl$pred_data[[1]], 
+        here::here("data", "pred_grid_size_model.RDS"))
+
 
 # key to assign weeks dates
 week_key <- data.frame(
@@ -204,6 +212,30 @@ pred_foo <- function(x = "week", nd, fit) {
     )
 }
 
+
+theme_sleek2 <- function (base_size = 11, base_family = "") {
+  half_line <- base_size/2
+  theme_light(base_size = base_size, base_family = base_family) + 
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(), 
+      axis.ticks.length = unit(half_line/2.2, "pt"),
+      strip.background = element_rect(fill = NA, colour = NA), 
+      strip.text.x = element_text(colour = "black"), 
+      strip.text.y = element_text(colour = "black"),
+      axis.text = element_text(colour = "black"), 
+      axis.title = element_text(colour = "black"), 
+      legend.title = element_text(colour = "black", 
+                                  size = rel(0.9)), 
+      panel.border = element_rect(fill = NA, colour = "grey70", linewidth = 1),
+      legend.key.size = unit(0.9, "lines"), 
+      legend.text = element_text(size = rel(0.7), colour = "black"), 
+      legend.key = element_rect(colour = NA, fill = NA),
+      legend.background = element_rect(colour = NA, fill = NA),
+      plot.title = element_text(colour = "black", size = rel(1)),
+      plot.subtitle = element_text(colour = "black", size = rel(0.85)))
+}
+
 plot_foo <- function(dat_in, var_in = "week", x_lab = "Week", 
                      col_in = "darkgrey") {
   var_in2 <- rlang::enquo(var_in)
@@ -231,9 +263,9 @@ if (!dir.exists(here::here("data", "model_fits", "fit_mvrfrw_size.rds"))) {
 
 
 fit_size <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
-    depth_z + poly(moon_z, 2) + sunrise_z +
-    slope_z + poly(week_z, 2):bin,
+  catch ~ 0 + (1 | year_f) + bin + 
+    (poly(slack_z, 2) * tide_z) +
+    depth_z + sunrise_z + slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[1]],
   mesh = dat_tbl$mesh[[1]],
@@ -250,9 +282,9 @@ fit_size <- sdmTMB(
 
 
 fit_stock <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
-    depth_z + sunrise_z + poly(moon_z, 2) +
-    slope_z + poly(week_z, 2):bin,
+  catch ~ 0 + (1 | year_f) + bin + 
+    (poly(slack_z, 2) * tide_z) +
+    depth_z + sunrise_z + slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[2]],
   mesh = dat_tbl$mesh[[2]],
@@ -268,9 +300,9 @@ fit_stock <- sdmTMB(
 
 
 fit_origin <- sdmTMB(
-  catch ~ 0 + (1 | year_f) + bin + poly(slack_z, 2) +
-    depth_z + poly(moon_z, 2) + sunrise_z +
-    slope_z + poly(week_z, 2):bin,
+  catch ~ 0 + (1 | year_f) + bin + 
+    (poly(slack_z, 2) * tide_z) +
+    depth_z + sunrise_z + slope_z + poly(week_z, 2):bin,
   offset = "offset",
   data = dat_tbl$data[[3]],
   mesh = dat_tbl$mesh[[3]],
@@ -303,20 +335,12 @@ qq_list <- purrr::pmap(
   list(fit_list, dat_tbl$data, names(fit_list)),
   function(x, y, tit) {
     pred_fixed <- x$family$linkinv(predict(x)$est_non_rf)
-    r <- simulate(x, nsim = 100, newdata = y)# %>% 
-      # sdmTMBextra::dharma_residuals(x, plot = FALSE)
+    r <- simulate(x, nsim = 100, newdata = y)# %>%
     DHARMa::createDHARMa(
       simulatedResponse = r,
       observedResponse = y$catch,
       fittedPredictedResponse = pred_fixed
     )
-    # ggplot(r) +
-    #   geom_point(aes(x = expected, y = observed)) +
-    #   labs(
-    #     title = tit, x = "Predicted", y = "Observed"
-    #   ) +
-    #   geom_abline(aes(intercept = 0, slope = 1)) +
-    #   ggsidekick::theme_sleek()
   }
 )
 
@@ -421,11 +445,18 @@ supp_table2 <- purrr::map2(
   bind_rows() %>% 
   mutate(dataset = factor(dataset, levels = c("size", "stock", "origin"))) %>% 
   arrange(term, dataset)
-write.csv(supp_table2,
-          here::here(
-            "data", "supp_par_est.csv"
-          ),
-          row.names = FALSE)
+
+png(here::here("figs", "ms_figs", "slope_est.png"), res = 250, units = "in", 
+    height = 4.5, width = 7.5)
+ggplot(supp_table2) +
+  geom_pointrange(
+    aes(x = dataset, y = estimate, ymin = conf.low, ymax = conf.high)
+    ) +
+  geom_hline(yintercept = 0, colour = "red") +
+  facet_wrap(~term, scales = "free_y") +
+  labs(x = "Model", y = "Parameter Estimate") +
+  theme_sleek2()
+dev.off()
 
 
 dat_tbl$week_preds <- purrr::map2(
@@ -438,6 +469,7 @@ dat_tbl$week_preds <- purrr::map2(
       month = 7,
       sunrise_z = 0,
       slack_z = 0,
+      tide_z = 0,
       moon_z = 0,
       bin = unique(x$bin),
       depth_z = 0,
@@ -502,7 +534,7 @@ nd_depth <- expand.grid(
   week_z = 0,
   month = 7, 
   slack_z = 0,
-  moon_z = 0,
+  tide_z = 0,
   bin = unique(dat_tbl$data[[1]]$bin),
   depth_z = seq(-2, 2, length = 30),
   slope_z = 0,
@@ -519,42 +551,41 @@ nd_slope <- nd_depth %>%
   )
 p_slope <- pred_foo(x = "slope", nd = nd_slope, fit = fit_size)
 
-# fixed slack effects
-nd_slack <- nd_depth %>%
-  mutate(
-    slack_z = seq(-3, 3, length = 30),
-    depth_z = 0
-  )
+# fixed slack and tide effects, effects
+nd_slack <- expand.grid(
+  year_f = unique(dat_tbl$data[[1]]$year_f)[[1]],
+  week_z = 0,
+  month = 7, 
+  slack_z = seq(-2, 2, length = 30),
+  tide_z = c(-1.5, 2),
+  # moon_z = 0,
+  bin = unique(dat_tbl$data[[1]]$bin),
+  depth_z = 0,
+  slope_z = 0,
+  sunrise_z = 0
+) %>% 
+  filter(bin == "medium")
 p_slack <- pred_foo(x = "slack", nd = nd_slack, fit = fit_size)
 
-# fixed lunar effects
-nd_moon <- nd_depth %>% 
-  mutate(
-    moon_z = seq(-1.8, 1.22, length = 30),
-    depth_z = 0
-  )
-p_moon <- pred_foo(x = "moon", nd = nd_moon, fit = fit_size)
 
 # fixed sunrise effects
 nd_sunrise <- nd_depth %>% 
   mutate(
-    sunrise_z = seq(-2.1, 3.2, length = 30),
-    moon_z = 0
+    sunrise_z = seq(-2.1, 3.2, length = 30)
   )
 p_sunrise <- pred_foo(x = "sunrise", nd = nd_sunrise, fit = fit_size)
 
 
 full_p <- list(p_depth, p_slope, p_slack, 
-               p_moon, p_sunrise) %>% 
+               p_sunrise) %>% 
   do.call(rbind, .) %>%
   group_by(variable) %>% 
   mutate(
+    tide_mag = ifelse(tide_z < 0, "small", "large"),
     depth = (depth_z * sd(catch_size$mean_depth)) + mean(catch_size$mean_depth),
     slope = (slope_z * sd(catch_size$mean_slope)) + mean(catch_size$mean_slope),
     slack = (slack_z * sd(catch_size$hours_from_slack)) +
       mean(catch_size$hours_from_slack),
-    moon = (moon_z * sd(catch_size$moon_illuminated)) +
-      mean(catch_size$moon_illuminated),
     sunrise = (sunrise_z * sd(catch_size$time_since_sunrise)) +
       mean(catch_size$time_since_sunrise),
     exp_est = exp(est),
@@ -575,24 +606,31 @@ depth_plot <- plot_foo(dat_in  = full_p, var_in = "depth",
 slope_plot <- plot_foo(dat_in  = full_p, var_in = "slope", 
                        x_lab = "Bottom Slope (degrees)", col_in = size_main) +
   theme(axis.title.y = element_blank())
-slack_plot <- plot_foo(dat_in  = full_p, var_in = "slack",
-                       x_lab = "Hours From Slack", col_in = size_main) +
+sunrise_plot <- plot_foo(dat_in  = full_p, var_in = "sunrise",
+                       x_lab = "Hours From Sunrise", col_in = size_main) +
   theme(axis.title.y = element_blank())
-moon_plot <- plot_foo(dat_in  = full_p, var_in = "moon", 
-                      x_lab = "Proportion Moon Illuminated",
-                      col_in = size_main) +
-  theme(axis.title.y = element_blank())
-sunrise_plot <- plot_foo(dat_in  = full_p, var_in = "sunrise", 
-                      x_lab = "Hours From Sunrise",
-                      col_in = size_main) +
-  theme(axis.title.y = element_blank())
+slack_plot <- ggplot(
+  full_p %>% filter(variable == "slack"), 
+  aes(x = slack, y = scale_est, ymin = scale_up, ymax = scale_lo,
+      lty = tide_mag)) +
+  geom_line(colour = size_main) +
+  labs(y = "Scaled Abundance", x = "Hours From Slack") +
+  geom_ribbon(alpha = 0.3, fill = size_main) +
+  ggsidekick::theme_sleek() +
+  scale_linetype_manual(
+    values = c(2, 3)
+  ) +
+  coord_cartesian(y = c(0.03, 3)) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))  +
+  theme_sleek2() +
+  theme(axis.title.y = element_blank(),
+        legend.position = "none") 
 
 p1 <- cowplot::plot_grid(
-  depth_plot, slope_plot, slack_plot, 
-  moon_plot, sunrise_plot,
+  depth_plot, slope_plot, slack_plot, sunrise_plot,
   ncol = 2
 )
-
 
 png(here::here("figs", "ms_figs", "size_other_fes.png"), res = 250, units = "in", 
     height = 6.5, width = 5.5)
