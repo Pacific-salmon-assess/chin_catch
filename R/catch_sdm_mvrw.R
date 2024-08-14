@@ -161,8 +161,8 @@ dat_tbl$pred_data <- purrr::map(
         ) 
   }
 )
-saveRDS(dat_tbl$pred_data[[1]], 
-        here::here("data", "pred_grid_size_model.RDS"))
+# saveRDS(dat_tbl$pred_data[[1]], 
+#         here::here("data", "pred_grid_size_model.RDS"))
 
 
 # key to assign weeks dates

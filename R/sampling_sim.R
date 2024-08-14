@@ -41,43 +41,22 @@ pred_dat_new <- purrr::map(
 ) %>% 
   bind_rows()
 mesh_new <- make_mesh(pred_dat_new, xy_cols = c("xUTM_ds", "yUTM_ds"), 
-                      n_knots = 175)
+                      n_knots = 125)
 
 new_sim <- simulate(fit_size, nsim = 10, newdata = pred_dat_new, 
                     params = "mvn")
 pred_dat_new$sim_catch <- new_sim[,1]
 
-
-library(sdmTMBextra)
-samp <- sample_mle_mcmc(
-  fit_size, mcmc_iter = 110, mcmc_warmup = 100, 
-  mcmc_chains = 4,
-  stan_args = list(thin = 5, cores = 4)
-)
-obj <- fit_size$tmb_obj
-random <- unique(names(obj$env$par[obj$env$random]))
-pl <- as.list(fit_size$sd_report, "Estimate")
-fixed <- !(names(pl) %in% random)
-map <- lapply(pl[fixed], function(x) factor(rep(NA, length(x))))
-obj <- TMB::MakeADFun(obj$env$data, pl, map = map, DLL = "sdmTMB")
-obj_mle <- fit_size
-obj_mle$tmb_obj <- obj
-obj_mle$tmb_map <- map
-sim_out <- simulate(
-  obj_mle, mcmc_samples = sdmTMBextra::extract_mcmc(samp), nsim = 10
-)
-
-
-
-ggplot() + 
-  geom_point(data = pred_dat_orig %>% filter(!sim_catch == 0),
-             aes(x = xUTM_ds, y = yUTM_ds, size = sim_catch),
-             shape = 21, fill = "#377eb8", alpha = 0.75,
-             inherit.aes = FALSE) +
-  facet_grid(bin~as.factor(month)) 
+# ggplot() + 
+#   geom_point(data = pred_dat_new %>% filter(!sim_catch == 0),
+#              aes(x = xUTM_ds, y = yUTM_ds, size = sim_catch),
+#              shape = 21, fill = "#377eb8", alpha = 0.75,
+#              inherit.aes = FALSE) +
+#   facet_grid(bin~as.factor(month)) 
 
 fit_new <- sdmTMB(
-  sim_catch ~ 1,
+  sim_catch ~ 0 + (1 | year_f) + bin + 
+    depth_z + slope_z + poly(week_z, 2):bin,
   data = pred_dat_new,
   mesh = mesh_new,
   family = sdmTMB::nbinom1(),
@@ -89,6 +68,12 @@ fit_new <- sdmTMB(
   share_range = TRUE,
   silent = FALSE
 )
+
+
+
+
+
+
 
 # take original data, set FEs to zero
 pred_dat_orig <- dat %>% 
@@ -118,7 +103,6 @@ fit_obs <- sdmTMB(
 )
 
 
-
 mesh <- make_mesh(dat, xy_cols = c("xUTM_ds", "yUTM_ds"), 
                       n_knots = 175)
 fit_new <- sdmTMB(
@@ -137,10 +121,12 @@ fit_new <- sdmTMB(
 
 
 
+
+
 # use predictive spatial grid to define simulation 
 pred_grid <- readRDS(here::here("data", "pred_grid_size_model.RDS")) %>% 
-  filter(bin == "medium")
-mesh <- make_mesh(pred_grid, xy_cols = c("xUTM_ds", "yUTM_ds"), n_knots = 175)
+  filter(bin == "medium", week == 18.5)
+mesh <- make_mesh(pred_grid, xy_cols = c("xUTM_ds", "yUTM_ds"), n_knots = 125)
 
 # use coefs from original model fit to simulate
 fit_size <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
@@ -156,7 +142,7 @@ sim_dat <- sdmTMB_simulate(
   formula = ~ 1 + depth_z + slope_z,
   data = pred_grid,
   mesh = mesh,
-  family = nbinom1(link = "log"),
+  family = nbinom1(),
   range = res$estimate[[1]],
   # sigma_E = 0.1,
   phi = res$estimate[[3]],
@@ -165,12 +151,22 @@ sim_dat <- sdmTMB_simulate(
   B = fes$estimate # intercept, depth and slope effects
 )
 
+
+
+
 # define original sampling frame
 orig_locs_sf <- fit_size$data %>% 
   dplyr::select(xUTM, yUTM) %>% 
   distinct() %>% 
   st_as_sf(., coords = c("xUTM", "yUTM"), 
            crs = st_crs("+proj=utm +zone=10 +units=m")) 
+
+ggplot() + 
+  geom_point(data = sim_dat %>% filter(!observed == 0),
+             aes(x = xUTM_ds, y = yUTM_ds, size = observed),
+             shape = 21, fill = "#377eb8", alpha = 0.75,
+             inherit.aes = FALSE) 
+
 
 # use sf to find nearest neighbors between each
 sim_dat_sf <- sim_dat %>% 
