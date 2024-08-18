@@ -119,7 +119,8 @@ trim_grid <- pred_bathy_grid %>%
   filter(X < max(dat_tbl$data[[1]]$xUTM + 1500) &
            X > min(dat_tbl$data[[1]]$xUTM - 1500),
          Y < max(dat_tbl$data[[1]]$yUTM + 1500) & 
-           Y > min(dat_tbl$data[[1]]$yUTM - 1500))
+           Y > min(dat_tbl$data[[1]]$yUTM - 1500), 
+         depth < 225)
 
 
 # clean lists above
@@ -278,7 +279,6 @@ fit_size <- sdmTMB(
   silent = FALSE
 )
 
-
 fit_stock <- sdmTMB(
   catch ~ 0 + (1 | year_f) + bin + 
     (poly(slack_z, 2) * tide_z) +
@@ -286,7 +286,7 @@ fit_stock <- sdmTMB(
   offset = "offset",
   data = dat_tbl$data[[2]],
   mesh = dat_tbl$mesh[[2]],
-  family = sdmTMB::nbinom1(),
+  family = sdmTMB::nbinom2(),
   spatial = "on",
   time = "month",
   spatiotemporal = "rw",
@@ -304,7 +304,7 @@ fit_origin <- sdmTMB(
   offset = "offset",
   data = dat_tbl$data[[3]],
   mesh = dat_tbl$mesh[[3]],
-  family = sdmTMB::nbinom1(),
+  family = sdmTMB::nbinom2(),
   spatial = "on",
   time = "month",
   spatiotemporal = "rw",
