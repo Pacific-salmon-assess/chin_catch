@@ -20,6 +20,12 @@ library(sf)
 library(sdmTMBextra)
 
 
+# plotting theme
+source(
+  here::here("R", "theme_sleek2.R")
+)
+
+
 ## prep size data
 catch_size1 <- readRDS(here::here("data", "catch_size_pre.rds"))
 
@@ -186,8 +192,7 @@ plot_map <- function(dat, column) {
   ggplot() +
     geom_sf(data = crop_coast) +
     geom_raster(data = dat, aes(X, Y, fill = {{ column }})) +
-    # coord_fixed() +
-    ggsidekick::theme_sleek() +
+    theme_sleek2() +
     theme(
       axis.text = element_blank(),
       axis.title = element_blank()
@@ -209,30 +214,6 @@ pred_foo <- function(x = "week", nd, fit) {
       est_se = apply(p, 1, sd),
       variable = x
     )
-}
-
-
-theme_sleek2 <- function (base_size = 11, base_family = "") {
-  half_line <- base_size/2
-  theme_light(base_size = base_size, base_family = base_family) + 
-    theme(
-      panel.grid.major = element_blank(),
-      panel.grid.minor = element_blank(), 
-      axis.ticks.length = unit(half_line/2.2, "pt"),
-      strip.background = element_rect(fill = NA, colour = NA), 
-      strip.text.x = element_text(colour = "black"), 
-      strip.text.y = element_text(colour = "black"),
-      axis.text = element_text(colour = "black"), 
-      axis.title = element_text(colour = "black"), 
-      legend.title = element_text(colour = "black", 
-                                  size = rel(0.9)), 
-      panel.border = element_rect(fill = NA, colour = "grey70", linewidth = 1),
-      legend.key.size = unit(0.9, "lines"), 
-      legend.text = element_text(size = rel(0.7), colour = "black"), 
-      legend.key = element_rect(colour = NA, fill = NA),
-      legend.background = element_rect(colour = NA, fill = NA),
-      plot.title = element_text(colour = "black", size = rel(1)),
-      plot.subtitle = element_text(colour = "black", size = rel(0.85)))
 }
 
 plot_foo <- function(dat_in, var_in = "week", x_lab = "Week", 
@@ -270,7 +251,6 @@ fit_size <- sdmTMB(
   mesh = dat_tbl$mesh[[1]],
   family = sdmTMB::nbinom1(),
   spatial = "on",
-  # spatial_varying = ~ 0 + size_bin,
   time = "month",
   spatiotemporal = "rw",
   groups = "bin",
@@ -657,10 +637,24 @@ spatial_preds <- purrr::map2(
   }
 )
 
+# use nsim to calculate uncertainty in mean
+spatial_preds_se <- purrr::map2(
+  fit_list,
+  dat_tbl$pred_data,
+  function (x, y) {
+    pp <- predict(x, newdata = y, nsim = 100, re_form = NULL, 
+                  re_form_iid = NA)
+    y$sd_est <- apply(pp, 1, sd)
+    return(y)
+  }
+)
 
 omegas <- purrr::map(
   spatial_preds,
   ~ .x %>%
+    filter(!month == "9",
+           !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
+           !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
     dplyr::select(-c(bin, week, month)) %>%
     distinct() %>% 
     plot_map(., omega_s) +
@@ -672,6 +666,9 @@ omegas <- purrr::map(
 epsilons <- purrr::map(
   spatial_preds,
   ~ .x %>% 
+    filter(!month == "9",
+           !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
+           !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
     plot_map(., upsilon_stc) +
     scale_fill_gradient2(name = "Spatial\nRF Effect") +
     facet_grid(bin ~ month) +
@@ -682,6 +679,9 @@ epsilons <- purrr::map(
 full_preds <- purrr::map(
   spatial_preds,
   ~ .x %>%  
+    filter(!month == "9",
+           !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
+           !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
     group_by(bin) %>% 
     mutate(scale_est = exp(est) / max(exp(est))) %>%
     left_join(., week_key, by = "week") %>% 
@@ -691,6 +691,19 @@ full_preds <- purrr::map(
     theme(legend.position = "top",
           legend.key.size = unit(.85, 'cm'),
           panel.background = element_rect(fill = "grey60"))
+)
+
+std_err <- purrr::map(
+  spatial_preds_se,
+  ~ .x %>%
+    filter(!month == "9",
+           !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
+           !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
+    plot_map(., sd_est) +
+    scale_fill_viridis_c(name = "SD of\nPrediction", option = "A") +
+    facet_grid(bin ~ month) +
+    theme(legend.position = "top",
+          panel.background = element_rect(fill = "grey60")) 
 )
 
 
@@ -710,6 +723,11 @@ png(here::here("figs", "ms_figs", "size_spatial_preds.png"), res = 250,
 full_preds[[1]]
 dev.off()
 
+png(here::here("figs", "ms_figs", "size_spatial_sd.png"), res = 250,
+    units = "in", height = 7.5, width = 7.5)
+std_err[[1]]
+dev.off()
+
 
 # stock figs
 png(here::here("figs", "ms_figs", "stock_omega.png"), res = 250, units = "in", 
@@ -727,6 +745,11 @@ png(here::here("figs", "ms_figs", "stock_spatial_preds.png"), res = 250,
 full_preds[[2]]
 dev.off()
 
+png(here::here("figs", "ms_figs", "stock_spatial_sd.png"), res = 250,
+    units = "in", height = 7.5, width = 7.5)
+std_err[[2]]
+dev.off()
+
 
 # origin figs
 png(here::here("figs", "ms_figs", "origin_omega.png"), res = 250, units = "in", 
@@ -742,5 +765,10 @@ dev.off()
 png(here::here("figs", "ms_figs", "origin_spatial_preds.png"), res = 250,
     units = "in", height = 7.5, width = 7.5)
 full_preds[[3]]
+dev.off()
+
+png(here::here("figs", "ms_figs", "origin_spatial_sd.png"), res = 250,
+    units = "in", height = 7.5, width = 7.5)
+std_err[[3]]
 dev.off()
 

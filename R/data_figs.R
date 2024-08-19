@@ -6,6 +6,11 @@
 
 library(tidyverse)
 
+# plotting theme
+source(
+  here::here("R", "theme_sleek2.R")
+)
+
 
 ## CLEAN -----------------------------------------------------------------------
 
@@ -271,6 +276,29 @@ catch_origin <- expand.grid(
 saveRDS(catch_origin, here::here("data", "catch_origin_pre.rds"))
 
 
+## secondary hatchery dataframe for supp analysis
+catch_origin2 <- chin  %>%
+  filter(size_bin %in% c("large", "medium"),
+         !agg_prob < 80,
+         agg %in% c("Fraser Fall", "Puget Sound", "Low Col."), 
+         !origin == "unknown") %>%
+  mutate(origin2 = paste(agg, origin, sep = " ")) %>% 
+  group_by(event, origin2) %>%
+  summarize(catch = n(), .groups = "drop") %>%
+  ungroup()
+
+catch_origin2b <- expand.grid(
+  event = set_dat$event,
+  origin2 = unique(catch_origin2$origin2)
+) %>%
+  arrange(event) %>%
+  left_join(., catch_origin2, by = c("event", "origin2")) %>%
+  replace_na(., replace = list(catch = 0)) %>%
+  left_join(., set_dat, by = "event")
+
+saveRDS(catch_origin2, here::here("data", "catch_origin2_pre.rds"))
+
+
 # SUPP TABLE OF STOCK BREAKDOWN ------------------------------------------------
 
 stock_table <- chin %>% 
@@ -324,7 +352,7 @@ full_comp_stacked <- ggplot(full_comp,
   scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
                     type = "qual", palette = "Paired") +
   labs(y = "Proportion Stock Composition", x = "Size Class") +
-  ggsidekick::theme_sleek()
+  theme_sleek2()
 
 # stock composition by month
 month_comp <- chin %>%
@@ -341,9 +369,8 @@ month_comp_stacked <- ggplot(month_comp,
   scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
                     type = "qual", palette = "Paired") +
   labs(x = "Month") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(axis.title.y = element_blank())
-
 
 
 # composition by origin (supplmentary)
@@ -363,7 +390,7 @@ origin_comp_stacked <- ggplot(
   scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
                     type = "qual", palette = "Paired", guide = "none") +
   labs(x = "Origin") +
-  ggsidekick::theme_sleek()  +
+  theme_sleek2()  +
   theme(axis.title.y = element_blank())
 
 
@@ -383,7 +410,7 @@ stage_comp_stacked <- ggplot(stage_comp,
   scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
                     type = "qual", palette = "Paired", guide = "none") +
   labs(x = "Maturity Stage") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(axis.title.y = element_blank())
 
 
@@ -403,7 +430,7 @@ year_comp_stacked <- ggplot(year_comp,
   scale_fill_brewer(name = "Stock Aggregate", na.value = "grey60",
                     type = "qual", palette = "Paired") +
   labs(x = "Maturity Stage") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(axis.title.y = element_blank())
 
 
@@ -430,19 +457,19 @@ chin <- readRDS(here::here("data", "clean_catch.RDS"))
 chin$agg2 <- str_replace(chin$agg, " ", "\n") %>% 
   fct_reorder(., as.numeric(chin$agg))
 
-length_hist <- ggplot(chin, aes(x = fl, fill = stage)) +
-  geom_histogram(col=I("black")) +
-  geom_vline(aes(xintercept = 65), linetype = 1) +
-  geom_vline(aes(xintercept = 75), linetype = 2) +
-  scale_fill_brewer(type = "div", palette = 5) +
-  labs(x = "Fork Length") +
-  ggsidekick::theme_sleek() +
-  theme(axis.title.y = element_blank())
- 
-png(here::here("figs", "ms_figs", "fl_histogram.png"), res = 250, units = "in", 
-    height = 4, width = 5.5)
-length_hist
-dev.off()
+# length_hist <- ggplot(chin, aes(x = fl, fill = stage)) +
+#   geom_histogram(col=I("black")) +
+#   geom_vline(aes(xintercept = 65), linetype = 1) +
+#   geom_vline(aes(xintercept = 75), linetype = 2) +
+#   scale_fill_brewer(type = "div", palette = 5) +
+#   labs(x = "Fork Length") +
+#   theme_sleek2() +
+#   theme(axis.title.y = element_blank())
+#  
+# png(here::here("figs", "ms_figs", "fl_histogram.png"), res = 250, units = "in", 
+#     height = 4, width = 5.5)
+# length_hist
+# dev.off()
 
 
 ## lipid content and fork length
@@ -452,7 +479,7 @@ lipid_fl <- ggplot(
 ) +
   geom_point(aes(x = fl, y = lipid, fill = stage), shape = 21, alpha = 0.6) +
   scale_fill_brewer(type = "div", palette = 5) +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   facet_wrap(~agg) +
   labs(x = "Fork Length", y = "Lipid Content") +
   theme(legend.position = "top", legend.title = element_blank())
@@ -466,7 +493,7 @@ fl_bp <- chin %>%
   geom_boxplot() +
   scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   labs(y = "Fork Length") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(
     axis.title.x = element_blank(),
     axis.text.x = element_blank()
@@ -481,7 +508,7 @@ lipid_bp <- chin %>%
   geom_boxplot() +
   scale_fill_brewer(type = "div", palette = 5, guide = "none") +
   labs(y = "Lipid Content") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(
     axis.title.x = element_blank()
   )
@@ -537,8 +564,9 @@ fit_lipid <- gam(
 
 ## checks
 sim_lipid <- simulate(fit_lipid, data = chin_lipid, nsim = 50) %>% 
-  as.matrix() 
-fix_pred <- predict(fit_lipid, newdata = chin_lipid, type = "response") %>% 
+  as.matrix() %>% 
+  exp()
+fix_pred <- predict(fit_lipid2, newdata = chin_lipid, type = "response") %>% 
   as.numeric()
 dharma_res <- DHARMa::createDHARMa(
       simulatedResponse = sim_lipid,
@@ -622,7 +650,7 @@ fe_plot <- ggplot(fes) +
         shape = covariate)
   ) +
   facet_wrap(~response, scales = "free_y") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   geom_hline(aes(yintercept = 0), lty = 2, colour = "red")
 
 png(here::here("figs", "ms_figs", "fes.png"), res = 250, units = "in", 
@@ -694,7 +722,7 @@ yday_fl <- ggplot(new_dat %>% filter(origin == "hatchery")) +
   scale_fill_manual(values = stage_pal, guide = "none") +
   scale_colour_manual(values = stage_pal, guide = "none") +
   labs(y = "Predicted Fork Length") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(
     axis.title.x = element_blank()
   ) +
@@ -710,7 +738,7 @@ yday_lipid <- ggplot(new_dat %>% filter(origin == "hatchery")) +
   scale_fill_manual(values = stage_pal) +
   scale_colour_manual(values = stage_pal) +
   labs(y = "Predicted Lipid Content") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(
     axis.title.x = element_blank(),
     legend.position = "top",
@@ -779,7 +807,7 @@ fl_lipid <- ggplot(new_dat2 %>% filter(stage == "mature", origin == "hatchery"))
               alpha = 0.3) +
   scale_fill_manual(values = stage_pal, guide = "none") +
   scale_colour_manual(values = stage_pal, guide = "none") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   labs(x = "Fork Length", y = "Lipid Content") +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) 
@@ -842,7 +870,7 @@ fl_agg <- ggplot(new_dat3) +
   ) +
   scale_fill_brewer(type = "qual", palette = "Paired", guide = "none") +
   labs(y = "Predicted Fork Length") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(
     axis.title.x = element_blank()
   )
@@ -854,7 +882,7 @@ lipid_agg <- ggplot(new_dat3) +
   ) +
   scale_fill_brewer(type = "qual", palette = "Paired", guide = "none") +
   labs(y = "Predicted Lipid Content") +
-  ggsidekick::theme_sleek() +
+  theme_sleek2() +
   theme(
     axis.title.x = element_blank()
   )
