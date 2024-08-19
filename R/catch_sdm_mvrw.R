@@ -319,22 +319,47 @@ qq_list <- purrr::pmap(
       observedResponse = y$catch,
       fittedPredictedResponse = pred_fixed
     )
+    
   }
 )
 
+
+
+simulated_quantiles <- sort(apply(qq_list[[1]]$simulatedResponse, 1, median))
+observed_quantiles <- sort(qq_list[[1]]$observedResponse)
+plot(simulated_quantiles, observed_quantiles, 
+     xlab = "Simulated Quantiles", 
+     ylab = "Observed Quantiles", 
+     pch = 19, col = "blue")
+
+# Optionally add a 45-degree reference line
+abline(0, 1, col = "red", lwd = 2)
+
+
 png(here::here("figs", "ms_figs", "qq_plot_size.png"), res = 250, units = "in", 
     height = 4.5, width = 7.5)
-plot(qq_list[[1]], title = "Size Model")
+DHARMa::plotQQunif(qq_list[[1]],
+                   testDispersion = FALSE,
+                   testUniformity = FALSE,
+                   testOutliers = FALSE,
+                   main = "Size Model")
 dev.off()
 
 png(here::here("figs", "ms_figs", "qq_plot_stock.png"), res = 250, units = "in", 
     height = 4.5, width = 7.5)
-plot(qq_list[[2]], title = "Stock Model")
+DHARMa::plotQQunif(qq_list[[2]], testDispersion = FALSE,
+                   testUniformity = FALSE,
+                   testOutliers = FALSE,
+                   main = "Stock Model")
 dev.off()
 
 png(here::here("figs", "ms_figs", "qq_plot_origin.png"), res = 250, units = "in", 
     height = 4.5, width = 7.5)
-plot(qq_list[[3]], title = "Origin Model")
+DHARMa::plotQQunif(qq_list[[3]], 
+                   testDispersion = FALSE,
+                   testUniformity = FALSE,
+                   testOutliers = FALSE,
+                   main = "Origin Model")
 dev.off()
 
 
