@@ -750,9 +750,9 @@ full_preds <- purrr::map(
 std_err <- purrr::map(
   spatial_preds_se,
   ~ .x %>%
-    filter(!month == "9",
+    filter(#!month == "9",
            !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
-           !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
+           !(month %in% c("5", "6") & bin == "WA_OR")) %>%
     plot_map(., sd_est) +
     scale_fill_viridis_c(name = "SD of\nPrediction", option = "A") +
     facet_grid(bin ~ month) +
@@ -762,11 +762,6 @@ std_err <- purrr::map(
 
 
 # size figs
-png(here::here("figs", "ms_figs", "size_omega.png"), res = 250, units = "in", 
-    height = 4, width = 4)
-omegas[[1]]
-dev.off()
-
 png(here::here("figs", "ms_figs", "size_epsilon.png"), res = 250, units = "in", 
     height = 7.5, width = 7.5)
 epsilons[[1]]
@@ -784,11 +779,6 @@ dev.off()
 
 
 # stock figs
-png(here::here("figs", "ms_figs", "stock_omega.png"), res = 250, units = "in", 
-    height = 4, width = 4)
-omegas[[2]]
-dev.off()
-
 png(here::here("figs", "ms_figs", "stock_epsilon.png"), res = 250, units = "in", 
     height = 7.5, width = 7.5)
 epsilons[[2]]
@@ -806,11 +796,6 @@ dev.off()
 
 
 # origin figs
-png(here::here("figs", "ms_figs", "origin_omega.png"), res = 250, units = "in", 
-    height = 4, width = 4)
-omegas[[3]]
-dev.off()
-
 png(here::here("figs", "ms_figs", "origin_epsilon.png"), res = 250, units = "in", 
     height = 7.5, width = 7.5)
 epsilons[[3]]
