@@ -71,12 +71,22 @@ catch_origin <- catch_origin1 %>%
   mutate(bin = as.factor(origin))
 
 
+## prep secondary origin dataset for supp analysis 
+catch_origin1b <- readRDS(here::here("data", "catch_origin2_pre.rds"))
+
+catch_origin2 <- catch_origin1b %>%
+  # remove sets not on a troller and tacking
+  filter(!grepl("rec", event),
+         !tack == "yes") %>% 
+  mutate(bin = as.factor(origin2))
+
+
 # join and modify 
 dat_tbl <- tibble(
-  dataset = c("size", "stock", "origin")
+  dataset = c("size", "stock", "origin", "origin2")
 ) 
 dat_tbl$data <- purrr::map(
-  list(catch_size, catch_stock, catch_origin),
+  list(catch_size, catch_stock, catch_origin, catch_origin2),
   ~ .x %>% 
     mutate(
       year_f = as.factor(year),
@@ -294,17 +304,36 @@ fit_origin <- sdmTMB(
   silent = FALSE
 )
 
+fit_origin2 <- sdmTMB(
+  catch ~ 0 + (1 | year_f) + bin + 
+    (poly(slack_z, 2) * tide_z) +
+    depth_z + sunrise_z + slope_z + poly(week_z, 2):bin,
+  offset = "offset",
+  data = dat_tbl$data[[4]],
+  mesh = dat_tbl$mesh[[4]],
+  family = sdmTMB::nbinom2(),
+  spatial = "on",
+  time = "month",
+  spatiotemporal = "rw",
+  groups = "bin",
+  anisotropy = TRUE,
+  share_range = FALSE,
+  silent = FALSE
+)
+
 saveRDS(fit_size, here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
 saveRDS(fit_stock, here::here("data", "model_fits", "fit_mvrfrw_stock.rds"))
 saveRDS(fit_origin, here::here("data", "model_fits", "fit_mvrfrw_origin.rds"))
+saveRDS(fit_origin2, here::here("data", "model_fits", "fit_mvrfrw_origin2.rds"))
 
 
 fit_size <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_size.rds"))
 fit_stock <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_stock.rds"))
 fit_origin <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_origin.rds"))
+fit_origin2 <- readRDS(here::here("data", "model_fits", "fit_mvrfrw_origin2.rds"))
 
-fit_list <- list(fit_size, fit_stock, fit_origin)
-names(fit_list) <- c("size", "stock", "origin")
+fit_list <- list(fit_size, fit_stock, fit_origin, fit_origin2)
+names(fit_list) <- c("size", "stock", "origin", "origin2")
 
 
 ## SIMULATION CHECKS -----------------------------------------------------------
@@ -797,3 +826,9 @@ png(here::here("figs", "ms_figs", "origin_spatial_sd.png"), res = 250,
 std_err[[3]]
 dev.off()
 
+
+# origin 2 figure 
+png(here::here("figs", "ms_figs", "origin2_spatial_preds.png"), res = 250,
+    units = "in", height = 7.5, width = 7.5)
+full_preds[[4]]
+dev.off()

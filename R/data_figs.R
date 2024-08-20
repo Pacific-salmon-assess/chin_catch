@@ -296,7 +296,7 @@ catch_origin2b <- expand.grid(
   replace_na(., replace = list(catch = 0)) %>%
   left_join(., set_dat, by = "event")
 
-saveRDS(catch_origin2, here::here("data", "catch_origin2_pre.rds"))
+saveRDS(catch_origin2b, here::here("data", "catch_origin2_pre.rds"))
 
 
 # SUPP TABLE OF STOCK BREAKDOWN ------------------------------------------------
