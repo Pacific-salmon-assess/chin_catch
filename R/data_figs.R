@@ -510,7 +510,8 @@ lipid_bp <- chin %>%
   labs(y = "Lipid Content") +
   theme_sleek2() +
   theme(
-    axis.title.x = element_blank()
+    axis.title.x = element_blank(),
+    axis.text = element_text(size = rel(0.8))
   )
 
 
@@ -564,9 +565,8 @@ fit_lipid <- gam(
 
 ## checks
 sim_lipid <- simulate(fit_lipid, data = chin_lipid, nsim = 50) %>% 
-  as.matrix() %>% 
-  exp()
-fix_pred <- predict(fit_lipid2, newdata = chin_lipid, type = "response") %>% 
+  as.matrix() 
+fix_pred <- predict(fit_lipid, newdata = chin_lipid, type = "response") %>% 
   as.numeric()
 dharma_res <- DHARMa::createDHARMa(
       simulatedResponse = sim_lipid,
@@ -575,7 +575,7 @@ dharma_res <- DHARMa::createDHARMa(
     )
 plot(dharma_res)
 
-sim_fl <- simulate(fit_fl, newdata = chin_fl, nsim = 50) %>% 
+sim_fl <- simulate(fit_fl, data = chin_fl, nsim = 50) %>% 
   as.matrix()
 fix_pred <- predict(fit_fl, newdata = chin_fl, type = "response") %>% 
   as.numeric() 
@@ -651,7 +651,11 @@ fe_plot <- ggplot(fes) +
   ) +
   facet_wrap(~response, scales = "free_y") +
   theme_sleek2() +
-  geom_hline(aes(yintercept = 0), lty = 2, colour = "red")
+  geom_hline(aes(yintercept = 0), lty = 2, colour = "red") +
+  labs(y = "Parameter Estimate") +
+  theme(
+    axis.title.x = element_blank()
+  )
 
 png(here::here("figs", "ms_figs", "fes.png"), res = 250, units = "in", 
     height = 3.25, width = 6.5)
@@ -872,7 +876,8 @@ fl_agg <- ggplot(new_dat3) +
   labs(y = "Predicted Fork Length") +
   theme_sleek2() +
   theme(
-    axis.title.x = element_blank()
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = rel(0.9))
   )
 
 lipid_agg <- ggplot(new_dat3) +
@@ -884,12 +889,14 @@ lipid_agg <- ggplot(new_dat3) +
   labs(y = "Predicted Lipid Content") +
   theme_sleek2() +
   theme(
-    axis.title.x = element_blank()
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = rel(0.9))
   )
 
 png(here::here("figs", "ms_figs", "agg_cond_ests.png"), res = 250, units = "in",
-    height = 4.25, width = 4.25)
+    height = 4.25, width = 5.25)
 cowplot::plot_grid(
   fl_agg, lipid_agg, ncol = 1
 )
 dev.off()
+

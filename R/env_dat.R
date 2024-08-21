@@ -55,3 +55,12 @@ buoy_dat_trim <- buoy_dat %>%
 
 ggplot(buoy_dat_trim) +
   geom_boxplot(aes(x = month, y = sstp, fill = year))
+
+
+buoy_dat_trim %>% 
+  group_by(year) %>% 
+  summarize(sd(sstp))
+
+buoy_dat_trim %>% 
+  group_by(month) %>% 
+  summarize(sd(sstp))

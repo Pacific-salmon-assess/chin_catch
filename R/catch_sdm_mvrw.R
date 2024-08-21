@@ -454,15 +454,15 @@ dat_tbl$res <- purrr::map2(
 # intercept plots
 int_plots <- purrr::map2(
   dat_tbl$fes,
-  list(size_main, stock_main, origin_main),
+  list(size_main, stock_main, origin_main, origin_main),
   ~ ggplot(.x) + 
     geom_pointrange(aes(x = term, y = exp_est, ymin = exp_lo, ymax = exp_hi),
                     shape = 21, fill = .y) +
-    ggsidekick::theme_sleek() +
+    theme_sleek2() +
     labs(y = "Mean Catch Rate") +
     theme(
       axis.title.x = element_blank(),
-      axis.text.x = element_text(angle=45, vjust=1, hjust=1)
+      axis.text.x = element_text(angle=45, vjust=1, hjust=1) 
     )
 )
 
@@ -527,7 +527,7 @@ dat_tbl$week_preds <- purrr::map2(
 
 
 week_plots <- purrr::map2(
-  dat_tbl$week_preds,
+  dat_tbl$week_preds[1:3],
   list(size_main, stock_main, origin_main),
   ~ plot_foo(dat_in = .x, var_in = "week", x_lab = "Week", col_in = .y) +
     facet_wrap(~bin) +
@@ -720,7 +720,7 @@ omegas <- purrr::map(
 epsilons <- purrr::map(
   spatial_preds,
   ~ .x %>% 
-    filter(!month == "9",
+    filter(#!month == "9",
            !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
            !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
     plot_map(., upsilon_stc) +
@@ -733,7 +733,7 @@ epsilons <- purrr::map(
 full_preds <- purrr::map(
   spatial_preds,
   ~ .x %>%  
-    filter(!month == "9",
+    filter(#!month == "9",
            !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
            !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
     group_by(bin) %>% 
@@ -747,6 +747,14 @@ full_preds <- purrr::map(
           panel.background = element_rect(fill = "grey60"))
 )
 
+purrr::map(spatial_preds_se,
+          ~ .x %>% 
+            filter(!(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
+              !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
+            pull(sd_est) %>% 
+            max()) %>% 
+  unlist()
+
 std_err <- purrr::map(
   spatial_preds_se,
   ~ .x %>%
@@ -754,7 +762,8 @@ std_err <- purrr::map(
            !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
            !(month %in% c("5", "6") & bin == "WA_OR")) %>%
     plot_map(., sd_est) +
-    scale_fill_viridis_c(name = "SD of\nPrediction", option = "A") +
+    scale_fill_viridis_c(name = "SD of\nPrediction", option = "A",
+                         limits = c(0, 1.9)) +
     facet_grid(bin ~ month) +
     theme(legend.position = "top",
           panel.background = element_rect(fill = "grey60")) 
