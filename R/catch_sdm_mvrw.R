@@ -665,7 +665,7 @@ p1 <- cowplot::plot_grid(
 )
 
 png(here::here("figs", "ms_figs", "size_other_fes.png"), res = 250, units = "in", 
-    height = 6.5, width = 5.5)
+    height = 5.5, width = 5.5)
 gridExtra::grid.arrange(
   gridExtra::arrangeGrob(
     p1, 
@@ -714,7 +714,8 @@ omegas <- purrr::map(
     plot_map(., omega_s) +
     scale_fill_gradient2(name = "Spatial\nRF Effect") +
     theme(legend.position = "top",
-          panel.background = element_rect(fill = "grey60")) 
+          panel.background = element_rect(fill = "grey60"),
+          legend.text = element_text(size = rel(0.8), colour = "black")) 
 )
 
 epsilons <- purrr::map(
@@ -727,7 +728,8 @@ epsilons <- purrr::map(
     scale_fill_gradient2(name = "Spatial\nRF Effect") +
     facet_grid(bin ~ month) +
     theme(legend.position = "top",
-          panel.background = element_rect(fill = "grey60")) 
+          panel.background = element_rect(fill = "grey60"),
+          legend.text = element_text(size = rel(0.8), colour = "black")) 
   )
 
 full_preds <- purrr::map(
@@ -744,7 +746,8 @@ full_preds <- purrr::map(
     facet_grid(bin ~ date)  +
     theme(legend.position = "top",
           legend.key.size = unit(.85, 'cm'),
-          panel.background = element_rect(fill = "grey60"))
+          panel.background = element_rect(fill = "grey60"),
+          legend.text = element_text(size = rel(0.8), colour = "black"))
 )
 
 purrr::map(spatial_preds_se,
@@ -762,11 +765,12 @@ std_err <- purrr::map(
            !(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
            !(month %in% c("5", "6") & bin == "WA_OR")) %>%
     plot_map(., sd_est) +
-    scale_fill_viridis_c(name = "SD of\nPrediction", option = "A",
+    scale_fill_viridis_c(name = "Prediction\nSD", option = "A",
                          limits = c(0, 1.9)) +
     facet_grid(bin ~ month) +
     theme(legend.position = "top",
-          panel.background = element_rect(fill = "grey60")) 
+          panel.background = element_rect(fill = "grey60"),
+          legend.text = element_text(size = rel(0.8), colour = "black")) 
 )
 
 
@@ -790,17 +794,20 @@ dev.off()
 # stock figs
 png(here::here("figs", "ms_figs", "stock_epsilon.png"), res = 250, units = "in", 
     height = 7.5, width = 7.5)
-epsilons[[2]]
+epsilons[[2]] +
+    theme(strip.text.y = element_text(colour = "black", size = rel(1))) 
 dev.off()
 
 png(here::here("figs", "ms_figs", "stock_spatial_preds.png"), res = 250,
     units = "in", height = 7.5, width = 7.5)
-full_preds[[2]]
+full_preds[[2]] +
+  theme(strip.text.y = element_text(colour = "black", size = rel(1))) 
 dev.off()
 
 png(here::here("figs", "ms_figs", "stock_spatial_sd.png"), res = 250,
     units = "in", height = 7.5, width = 7.5)
-std_err[[2]]
+std_err[[2]] +
+  theme(strip.text.y = element_text(colour = "black", size = rel(1)))  
 dev.off()
 
 
@@ -824,5 +831,6 @@ dev.off()
 # origin 2 figure 
 png(here::here("figs", "ms_figs", "origin2_spatial_preds.png"), res = 250,
     units = "in", height = 7.5, width = 7.5)
-full_preds[[4]]
+full_preds[[4]] +
+  theme(strip.text.y = element_text(colour = "black", size = rel(0.8)))  
 dev.off()
