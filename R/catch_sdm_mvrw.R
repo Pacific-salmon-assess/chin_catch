@@ -238,7 +238,7 @@ plot_foo <- function(dat_in, var_in = "week", x_lab = "Week",
     geom_line(colour = col_in) +
     labs(x = x_lab, y = "Scaled Abundance") +
     geom_ribbon(alpha = 0.3, fill = col_in) +
-    ggsidekick::theme_sleek() +
+    theme_sleek2() +
     coord_cartesian(y = c(0.03, 3)) +
     scale_x_continuous(expand = c(0, 0)) +
     scale_y_continuous(expand = c(0, 0)) 
