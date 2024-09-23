@@ -1,10 +1,5 @@
 ## Fit size-based spatial distribution models
-# August 7, 2020
-# updated Feb 22, 2023
-# Given cross-validation (catch_sdm_cv.R) and goals of analysis, utilize
-# month focused spatio temporal model
-# Also include static spatial variables (e.g. depth/slope) and dynamic 
-# fine-scale (e.g. time of day) 
+# updated Sep 6, 2024
 
 
 # ensure mvrfrw branch installed
