@@ -76,7 +76,8 @@ main_map <- base_map +
   geom_sf(data = coast_trim, fill = "darkgrey") +
   geom_sf(data = crit_hab, colour = "red", fill = "transparent", lty = 2) +
   theme(axis.text = element_blank(),
-        axis.ticks = element_blank()) +
+        axis.ticks = element_blank(),
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) +
   scale_x_continuous(limits = c(min(coast_coords[ , "X"]), 
                                 max(coast_coords[ , "X"]) - 10000), 
                      expand = c(0, 0)) +
@@ -108,9 +109,10 @@ sets_only <- ggplot() +
   scale_y_continuous(limits = c(min(crop_coast_coords[ , "Y"]) + 4500,
                                 max(crop_coast_coords[ , "Y"]) - 2500),
                      expand = c(0, 0)) +
-  annotation_scale(location = "br", width_hint = 0.4) +
+  annotation_scale(location = "br", width_hint = 0.35,
+                   pad_x = unit(0.05, "in")) +
   annotation_north_arrow(location = "br", which_north = "true", 
-                         pad_x = unit(0.0, "in"), pad_y = unit(0.2, "in"),
+                         pad_x = unit(0.0, "in"), pad_y = unit(0.22, "in"),
                          style = north_arrow_fancy_orienteering)
 
 png(here::here("figs", "ms_figs", "study_area1.png"), res = 250, units = "in", 
@@ -118,7 +120,7 @@ png(here::here("figs", "ms_figs", "study_area1.png"), res = 250, units = "in",
 cowplot::ggdraw() +
   cowplot::draw_plot(sets_only) +
   cowplot::draw_plot(main_map,
-            height = 0.3, x = -0.29, y = 0.08)
+            height = 0.27, x = -0.29, y = 0.08)
 dev.off()
 
 

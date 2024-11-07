@@ -710,7 +710,8 @@ omegas <- purrr::map(
     scale_fill_gradient2(name = "Spatial\nRF Effect") +
     theme(legend.position = "top",
           panel.background = element_rect(fill = "grey60"),
-          legend.text = element_text(size = rel(0.8), colour = "black")) 
+          legend.text = element_text(size = rel(0.8), colour = "black"),
+          legend.key.width = unit(1.5, "cm")) 
 )
 
 epsilons <- purrr::map(
@@ -724,7 +725,8 @@ epsilons <- purrr::map(
     facet_grid(bin ~ month) +
     theme(legend.position = "top",
           panel.background = element_rect(fill = "grey60"),
-          legend.text = element_text(size = rel(0.8), colour = "black")) 
+          legend.text = element_text(size = rel(0.8), colour = "black"),
+          legend.key.width = unit(1.5, "cm")) 
   )
 
 full_preds <- purrr::map(
@@ -742,16 +744,9 @@ full_preds <- purrr::map(
     theme(legend.position = "top",
           legend.key.size = unit(.85, 'cm'),
           panel.background = element_rect(fill = "grey60"),
-          legend.text = element_text(size = rel(0.8), colour = "black"))
+          legend.text = element_text(size = rel(0.8), colour = "black"),
+          legend.key.width = unit(1.5, "cm"))
 )
-
-purrr::map(spatial_preds_se,
-          ~ .x %>% 
-            filter(!(month == "5" & bin %in% c("Cali", "Fraser 4.1")),
-              !(month %in% c("5", "6") & bin == "WA_OR")) %>% 
-            pull(sd_est) %>% 
-            max()) %>% 
-  unlist()
 
 std_err <- purrr::map(
   spatial_preds_se,
@@ -765,7 +760,8 @@ std_err <- purrr::map(
     facet_grid(bin ~ month) +
     theme(legend.position = "top",
           panel.background = element_rect(fill = "grey60"),
-          legend.text = element_text(size = rel(0.8), colour = "black")) 
+          legend.text = element_text(size = rel(0.8), colour = "black"),
+          legend.key.width = unit(1.5, "cm")) 
 )
 
 
