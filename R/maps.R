@@ -5,13 +5,16 @@ library(tidyverse)
 library(ggplot2)
 library(ggmap)
 library(measurements)
-library(maptools)
+library(ggspatial)
+# library(maptools)
 library(rmapshaper)
 library(mapdata)
 
 
 sets <- readRDS(here::here("data", "cleanSetData.RDS")) %>% 
-  mutate(month = lubridate::month(date_time_local)) %>%
+  mutate(month = lubridate::month(date_time_local),
+         xUTM = 1000 * xUTM,
+         yUTM = 1000 * yUTM) %>%
   # remove sets not on a troller
   filter(!grepl("rec", event))
 
@@ -72,7 +75,8 @@ crit_hab <- sf::st_read(
 main_map <- base_map +
   geom_sf(data = coast_trim, fill = "darkgrey") +
   geom_sf(data = crit_hab, colour = "red", fill = "transparent", lty = 2) +
-  theme(axis.text = element_blank()) +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) +
   scale_x_continuous(limits = c(min(coast_coords[ , "X"]), 
                                 max(coast_coords[ , "X"]) - 10000), 
                      expand = c(0, 0)) +
@@ -82,47 +86,39 @@ main_map <- base_map +
 
 sets_only <- ggplot() +
   geom_sf(data = crop_coast, color = "black", fill = "white", size = 1.25) +
-  geom_point(data = sets, aes(x = xUTM, y = yUTM, fill = as.factor(year)),
-             inherit.aes = FALSE, alpha = 0.4, shape = 21) +
   geom_contour(data = bath_grid %>%
                  filter(depth < 401),
                aes(x = X, y = Y, z = depth),
                breaks = seq(50, 400, by = 50),
                colour = "black") +
+  geom_point(data = sets, aes(x = xUTM, y = yUTM, 
+                              fill = as.factor(year)),
+             inherit.aes = FALSE, alpha = 0.4, shape = 21) +
   ggsidekick::theme_sleek() +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) +
   scale_fill_viridis_d(name = "Sampling\nYear") +
   theme(axis.title = element_blank(),
         legend.title = element_blank(),
-        axis.text = element_blank(),
-        panel.background = element_rect(fill = "grey60")) +
+        panel.background = element_rect(fill = "grey60"), 
+        legend.position = "top") +
   scale_x_continuous(limits = c(min(crop_coast_coords[ , "X"]) + 2500,
                                 max(crop_coast_coords[ , "X"]) - 5000),
                      expand = c(0, 0)) +
   scale_y_continuous(limits = c(min(crop_coast_coords[ , "Y"]) + 4500,
                                 max(crop_coast_coords[ , "Y"]) - 2500),
                      expand = c(0, 0)) +
-  ggsn::north(crop_coast, symbol = 15, location = "bottomright", #scale = 0.09,
-              anchor = c(
-                x = max(crop_coast_coords[ , "X"]) - 10500,
-                y = min(crop_coast_coords[ , "Y"]) + 13000
-              )) +
-  ggsn::scalebar(crop_coast, dist_unit = "km", dist = 10, st.size = 2, 
-                 anchor = c(
-                   x = max(crop_coast_coords[ , "X"]),
-                   y = min(crop_coast_coords[ , "Y"]) + 9000
-                 ),
-                 transform = FALSE, location = "bottomright")
-
-
+  annotation_scale(location = "br", width_hint = 0.4) +
+  annotation_north_arrow(location = "br", which_north = "true", 
+                         pad_x = unit(0.0, "in"), pad_y = unit(0.2, "in"),
+                         style = north_arrow_fancy_orienteering)
 
 png(here::here("figs", "ms_figs", "study_area1.png"), res = 250, units = "in", 
     height = 5.5, width = 7)
 cowplot::ggdraw() +
   cowplot::draw_plot(sets_only) +
   cowplot::draw_plot(main_map,
-            height = 0.33, x = -0.33, y = 0.08)
+            height = 0.3, x = -0.29, y = 0.08)
 dev.off()
 
 
